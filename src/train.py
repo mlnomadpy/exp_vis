@@ -125,7 +125,7 @@ def _pretrain_autoencoder_loop(
     checkpointer = orbax.PyTreeCheckpointer()
     print(f"\n💾 Saving pretrained ENCODER state to {save_dir}...")
     checkpointer.save(save_dir, encoder_state, force=True)
-    from .analysis import visualize_reconstructions, visualize_tsne
+    from analysis import visualize_reconstructions, visualize_tsne
     vis_iter = augmented_train_ds.batch(32).as_numpy_iterator()
     visualize_reconstructions(autoencoder_model, vis_iter, title="Denoising Autoencoder Reconstructions")
     tsne_iter = base_train_ds.batch(32).as_numpy_iterator()
