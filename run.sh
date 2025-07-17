@@ -3,4 +3,4 @@
 # Activate your environment here if needed, e.g.:
 # source venv/bin/activate
 
-python main.py 
+python src/main.py 

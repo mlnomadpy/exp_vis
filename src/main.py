@@ -4,7 +4,7 @@
 import os
 import tensorflow as tf
 import wandb
-from src.runner import run_training_and_analysis
+from runner import run_training_and_analysis
 
 def main():
     """Main function to define configurations and run the training and analysis."""
