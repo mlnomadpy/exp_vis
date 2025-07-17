@@ -1,0 +1,11 @@
+jax
+flax
+tensorflow
+tensorflow-datasets
+keras-cv
+tqdm
+scikit-learn
+seaborn
+orbax
+optax
+wandb 
