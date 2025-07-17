@@ -221,6 +221,14 @@ def _train_model_loop(
                 metrics_history['test_accuracy'].append(test_metrics['accuracy'])
                 metrics_computer.reset()
                 pbar.set_postfix({'Train Acc': f"{train_metrics['accuracy']:.4f}", 'Test Acc': f"{test_metrics['accuracy']:.4f}"})
+                # Log progress to wandb
+                log_metrics({
+                    'step': global_step_counter,
+                    'train_loss': train_metrics['loss'],
+                    'train_accuracy': train_metrics['accuracy'],
+                    'test_loss': test_metrics['loss'],
+                    'test_accuracy': test_metrics['accuracy'],
+                }, step=global_step_counter)
             global_step_counter += 1
         if global_step_counter >= total_steps: break
     print(f"✅ {stage} complete on {dataset_name} after {global_step_counter} steps!")
