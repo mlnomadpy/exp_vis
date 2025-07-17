@@ -13,6 +13,7 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 from flax import nnx
+import optax
 
 def plot_training_curves(history, model_name):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
@@ -152,5 +153,117 @@ def visualize_reconstructions(autoencoder, dataset_iter, title: str, num_images:
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.show()
 
-# --- Saliency Map Generation, Kernel Similarity, Adversarial Attack, and Robustness Analysis functions should also be moved here from main.py.
-# For brevity, only the function signatures and comments are included here. Move the full function bodies from main.py and update imports as needed. 
+# --- Saliency Map Generation ---
+@partial(jax.jit, static_argnames=['model'])
+def get_saliency_map(model, image, label):
+    def model_output_for_class(img):
+        logits = model(img[None, ...], training=False)
+        return logits[0, label]
+    grad_fn = jax.grad(model_output_for_class)
+    grads = grad_fn(image)
+    return jnp.abs(grads)
+
+def plot_saliency_maps(model, test_ds, class_names: list, num_images: int = 5):
+    print("\n🗺️  Generating Saliency Maps...")
+    vis_batch = next(test_ds.batch(num_images).as_numpy_iterator())
+    images, labels = vis_batch['image'], vis_batch['label']
+    logits = model(images, training=False)
+    predicted_labels = jnp.argmax(logits, axis=1)
+    plt.figure(figsize=(num_images * 4, 8))
+    for i in range(num_images):
+        saliency = get_saliency_map(model, images[i], predicted_labels[i])
+        saliency_map = np.array(jnp.max(saliency, axis=-1))
+        ax = plt.subplot(2, num_images, i + 1)
+        plt.imshow(images[i])
+        title = (f"Pred: {class_names[predicted_labels[i]]}\n" f"True: {class_names[labels[i]]}")
+        ax.set_title(title, color="green" if predicted_labels[i] == labels[i] else "red")
+        ax.axis('off')
+        ax = plt.subplot(2, num_images, i + 1 + num_images)
+        plt.imshow(images[i])
+        plt.imshow(saliency_map, cmap='hot', alpha=0.6)
+        ax.set_title("Saliency Map")
+        ax.axis('off')
+    plt.suptitle("Saliency Map Analysis", fontsize=16, fontweight='bold')
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.show()
+
+# --- Kernel Similarity ---
+def visualize_kernel_similarity(model):
+    print("\n🕸️  Analyzing Kernel Similarity...")
+    from models import YatConvBlock, YatConv
+    conv_layers = {}
+    for block_name, block in vars(model).items():
+        if isinstance(block, YatConvBlock):
+            for layer_name, layer in vars(block).items():
+                if hasattr(layer, 'kernel'):
+                    conv_layers[f"{block_name}_{layer_name}"] = layer
+    for name, layer in conv_layers.items():
+        kernels = np.array(layer.kernel.value)
+        num_filters = kernels.shape[3]
+        kernels_flat = kernels.reshape(-1, num_filters).T
+        similarity_matrix = cosine_similarity(kernels_flat)
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(similarity_matrix, cmap='vlag', vmin=-1, vmax=1)
+        plt.title(f"Kernel Cosine Similarity for Layer: {name}", fontweight='bold')
+        plt.xlabel("Kernel Index")
+        plt.ylabel("Kernel Index")
+        plt.show()
+
+# --- Adversarial Attack (FGSM) ---
+@partial(jax.jit, static_argnames=['model'])
+def generate_adversarial_example_fgsm(model, image, label, epsilon):
+    def loss_for_grad(img):
+        logits = model(img[None, ...], training=False)
+        return optax.softmax_cross_entropy_with_integer_labels(logits, label[None, ...]).mean()
+    grad_fn = jax.grad(loss_for_grad)
+    grads = grad_fn(image)
+    perturbation = epsilon * jnp.sign(grads)
+    adversarial_image = image + perturbation
+    adversarial_image = jnp.clip(adversarial_image, 0, 1)
+    return adversarial_image
+
+def test_adversarial_robustness(model, test_ds_iter, class_names: list, epsilon: float, num_vis_images: int = 5):
+    print(f"\n🛡️  Testing Adversarial Robustness with Epsilon = {epsilon}...")
+    total_correct = 0
+    total_images = 0
+    vis_images, vis_adv_images, vis_labels, vis_orig_preds, vis_adv_preds = [], [], [], [], []
+    for batch in tqdm(test_ds_iter, desc="Adversarial Evaluation"):
+        images, labels = batch['image'], batch['label']
+        adv_images = jax.vmap(generate_adversarial_example_fgsm, in_axes=(None, 0, 0, None))(
+            model, images, labels, epsilon
+        )
+        adv_logits = model(adv_images, training=False)
+        adv_preds = jnp.argmax(adv_logits, axis=1)
+        total_correct += jnp.sum(adv_preds == labels)
+        total_images += len(labels)
+        if len(vis_images) < num_vis_images:
+            orig_logits = model(images, training=False)
+            orig_preds = jnp.argmax(orig_logits, axis=1)
+            num_to_add = min(num_vis_images - len(vis_images), len(images))
+            vis_images.extend(images[:num_to_add])
+            vis_adv_images.extend(adv_images[:num_to_add])
+            vis_labels.extend(labels[:num_to_add])
+            vis_orig_preds.extend(orig_preds[:num_to_add])
+            vis_adv_preds.extend(adv_preds[:num_to_add])
+    accuracy = (total_correct / total_images) * 100
+    print(f"\nAdversarial Accuracy: {accuracy:.2f}%")
+    plt.figure(figsize=(num_vis_images * 4, 12))
+    for i in range(num_vis_images):
+        ax = plt.subplot(3, num_vis_images, i + 1)
+        plt.imshow(vis_images[i])
+        title = (f"Pred: {class_names[vis_orig_preds[i]]}\n" f"True: {class_names[vis_labels[i]]}")
+        ax.set_title(title, color="green" if vis_orig_preds[i] == vis_labels[i] else "red")
+        ax.axis('off')
+        ax = plt.subplot(3, num_vis_images, i + 1 + num_vis_images)
+        perturbation = vis_adv_images[i] - vis_images[i]
+        plt.imshow((perturbation - perturbation.min()) / (perturbation.max() - perturbation.min()))
+        ax.set_title(f"Perturbation (ε={epsilon})")
+        ax.axis('off')
+        ax = plt.subplot(3, num_vis_images, i + 1 + 2 * num_vis_images)
+        plt.imshow(vis_adv_images[i])
+        title = (f"Adv Pred: {class_names[vis_adv_preds[i]]}\n" f"True: {class_names[vis_labels[i]]}")
+        ax.set_title(title, color="green" if vis_adv_preds[i] == vis_labels[i] else "red")
+        ax.axis('off')
+    plt.suptitle("Adversarial Attack Analysis (FGSM)", fontsize=16, fontweight='bold')
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.show() 
