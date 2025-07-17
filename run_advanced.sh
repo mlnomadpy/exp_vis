@@ -3,7 +3,10 @@
 # Example advanced usage of the training pipeline with full control over arguments
 # You can modify these values as needed
 
-# Dataset options: 'cifar10' or a path to a custom folder
+# Dataset options: 
+# - TFDS datasets: 'cifar10', 'cifar100', 'mnist', 'fashion_mnist', 'imagenet2012', 
+#   'caltech101', 'oxford_flowers102', 'stanford_dogs', 'cats_vs_dogs', 'stl10'
+# - Custom folder: path to your image folder
 DATASET="cifar10"
 LEARNING_RATE=0.005
 USE_PRETRAINING="--use_pretraining"           # Remove this line to disable pretraining
@@ -14,8 +17,14 @@ RUN_ADVERSARIAL="--run_adversarial_analysis"  # Remove to skip adversarial robus
 ADVERSARIAL_EPSILON=0.02
 
 # Dataset/training config overrides (uncomment and edit as needed)
+# Note: Some datasets have specific defaults:
+# - mnist/fashion_mnist: 1 channel, 28x28, 10 classes
+# - cifar10/cifar100: 3 channels, 32x32, 10/100 classes  
+# - stl10: 3 channels, 96x96, 10 classes
+# - imagenet2012: 3 channels, 224x224, 1000 classes
+# - caltech101/oxford_flowers102/stanford_dogs: 3 channels, 224x224
 INPUT_CHANNELS=3           # e.g. 1 for grayscale, 3 for RGB
-INPUT_DIM="32,32"          # e.g. 28,28 or 64,64
+INPUT_DIM="32,32"          # e.g. 28,28 or 64,64 or 96,96 or 224,224
 LABEL_SMOOTH=0.1           # e.g. 0.0 for no smoothing
 NUM_EPOCHS=100             # e.g. 50
 EVAL_EVERY=300             # e.g. 100
