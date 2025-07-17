@@ -17,6 +17,19 @@ def main():
     parser.add_argument('--run_kernel_analysis', action='store_true', help='Run kernel similarity analysis')
     parser.add_argument('--run_adversarial_analysis', action='store_true', help='Run adversarial robustness analysis')
     parser.add_argument('--adversarial_epsilon', type=float, default=0.01, help='Epsilon for adversarial attack')
+    parser.add_argument('--input_channels', type=int, default=None, help='Number of input channels')
+    parser.add_argument('--input_dim', type=str, default=None, help='Input dimension as H,W (e.g. 32,32)')
+    parser.add_argument('--label_smooth', type=float, default=None, help='Label smoothing factor')
+    parser.add_argument('--num_epochs', type=int, default=None, help='Number of epochs')
+    parser.add_argument('--eval_every', type=int, default=None, help='Evaluation frequency (steps)')
+    parser.add_argument('--batch_size', type=int, default=None, help='Batch size')
+    parser.add_argument('--pretrain_epochs', type=int, default=None, help='Pretraining epochs')
+    parser.add_argument('--pretrain_batch_size', type=int, default=None, help='Pretraining batch size')
+    parser.add_argument('--test_split_percentage', type=float, default=None, help='Test split percentage for custom folder')
+    parser.add_argument('--image_key', type=str, default=None, help='Image key for TFDS')
+    parser.add_argument('--label_key', type=str, default=None, help='Label key for TFDS')
+    parser.add_argument('--train_split', type=str, default=None, help='Train split for TFDS')
+    parser.add_argument('--test_split', type=str, default=None, help='Test split for TFDS')
     args = parser.parse_args()
 
     dataset_configs = {
@@ -40,7 +53,39 @@ def main():
         'pretrain_epochs': 20, 'pretrain_batch_size': 128,
     }
 
+    # Update dataset_configs for the selected dataset with CLI args
     dataset_to_run = args.dataset
+    if dataset_to_run not in dataset_configs:
+        dataset_configs[dataset_to_run] = {}
+    config = dataset_configs[dataset_to_run]
+    if args.input_channels is not None:
+        config['input_channels'] = args.input_channels
+    if args.input_dim is not None:
+        dims = tuple(map(int, args.input_dim.split(',')))
+        config['input_dim'] = dims
+    if args.label_smooth is not None:
+        config['label_smooth'] = args.label_smooth
+    if args.num_epochs is not None:
+        config['num_epochs'] = args.num_epochs
+    if args.eval_every is not None:
+        config['eval_every'] = args.eval_every
+    if args.batch_size is not None:
+        config['batch_size'] = args.batch_size
+    if args.pretrain_epochs is not None:
+        config['pretrain_epochs'] = args.pretrain_epochs
+    if args.pretrain_batch_size is not None:
+        config['pretrain_batch_size'] = args.pretrain_batch_size
+    if args.test_split_percentage is not None:
+        config['test_split_percentage'] = args.test_split_percentage
+    if args.image_key is not None:
+        config['image_key'] = args.image_key
+    if args.label_key is not None:
+        config['label_key'] = args.label_key
+    if args.train_split is not None:
+        config['train_split'] = args.train_split
+    if args.test_split is not None:
+        config['test_split'] = args.test_split
+
     learning_rate = args.learning_rate
     use_pretraining = args.use_pretraining
     freeze_encoder_during_finetune = args.freeze_encoder
