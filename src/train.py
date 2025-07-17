@@ -9,8 +9,8 @@ from flax import nnx
 from tqdm import tqdm
 import os
 import orbax.checkpoint as orbax
-from models import YatCNN, ConvAutoencoder
-from data import create_image_folder_dataset, get_image_processor, get_tfds_processor, augment_for_pretraining, augment_for_finetuning
+from .models import YatCNN, ConvAutoencoder
+from .data import create_image_folder_dataset, get_image_processor, get_tfds_processor, augment_for_pretraining, augment_for_finetuning
 import tensorflow_datasets as tfds
 import tensorflow as tf
 
@@ -66,8 +66,63 @@ def _pretrain_autoencoder_loop(
     dataset_configs: dict,
     fallback_configs: dict,
 ):
-    # ... (move function body from main.py and update imports)
-    pass
+    print(f"\n🚀 Starting Denoising Autoencoder Pretraining for {model_name} on {dataset_name}...")
+    is_path = os.path.isdir(dataset_name)
+    config = dataset_configs.get(dataset_name) if not is_path else dataset_configs.get('custom_folder', fallback_configs)
+    image_size = config.get('input_dim', (64, 64))
+    input_channels = config.get('input_channels', 3)
+    current_batch_size = config.get('pretrain_batch_size', fallback_configs['pretrain_batch_size'])
+    current_num_epochs = config.get('pretrain_epochs', fallback_configs['pretrain_epochs'])
+    if is_path:
+        train_ds, _, class_names, train_size = create_image_folder_dataset(dataset_name, validation_split=0.01, seed=42)
+        processor = get_image_processor(image_size=image_size, num_channels=input_channels)
+        base_train_ds = train_ds.map(processor)
+    else: # TFDS
+        base_train_ds, ds_info = tfds.load(
+            dataset_name,
+            split=config['train_split'],
+            shuffle_files=True,
+            as_supervised=False,
+            with_info=True,
+        )
+        class_names = ds_info.features[config['label_key']].names
+        train_size = ds_info.splits[config['train_split']].num_examples
+        processor = get_tfds_processor(image_size, config['image_key'], config['label_key'])
+        base_train_ds = base_train_ds.map(processor)
+    def apply_augmentations(x):
+        return {
+            'original_image': x['image'],
+            'augmented_image': augment_for_pretraining(x['image']),
+            'label': x['label'] # Keep label for t-SNE
+        }
+    augmented_train_ds = base_train_ds.map(apply_augmentations, num_parallel_calls=tf.data.AUTOTUNE)
+    autoencoder_model = ConvAutoencoder(num_classes=len(class_names), input_channels=input_channels, rngs=nnx.Rngs(rng_seed))
+    steps_per_epoch = train_size // current_batch_size
+    total_steps = current_num_epochs * steps_per_epoch
+    schedule = optax.cosine_decay_schedule(init_value=learning_rate, decay_steps=total_steps)
+    tx = optimizer_constructor(learning_rate=schedule)
+    optimizer = nnx.Optimizer(autoencoder_model, tx)
+    print(f"Pre-training for {current_num_epochs} epochs ({total_steps} steps)...")
+    for epoch in range(current_num_epochs):
+        epoch_train_iter = augmented_train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
+        pbar = tqdm(epoch_train_iter, total=steps_per_epoch, desc=f"Autoencoder Epoch {epoch + 1}/{current_num_epochs}")
+        for batch_data in pbar:
+            loss = pretrain_autoencoder_step(autoencoder_model, optimizer, batch_data)
+            pbar.set_postfix({'reconstruction_loss': f'{loss:.6f}'})
+            if jnp.isnan(loss):
+                print("\n❗️ Loss is NaN. Stopping pretraining.")
+                return None
+    save_dir = os.path.abspath(f"./models/{model_name}_autoencoder_pretrained_encoder")
+    encoder_state = nnx.state(autoencoder_model.encoder, nnx.Param)
+    checkpointer = orbax.PyTreeCheckpointer()
+    print(f"\n💾 Saving pretrained ENCODER state to {save_dir}...")
+    checkpointer.save(save_dir, encoder_state, force=True)
+    from .analysis import visualize_reconstructions, visualize_tsne
+    vis_iter = augmented_train_ds.batch(32).as_numpy_iterator()
+    visualize_reconstructions(autoencoder_model, vis_iter, title="Denoising Autoencoder Reconstructions")
+    tsne_iter = base_train_ds.batch(32).as_numpy_iterator()
+    visualize_tsne(autoencoder_model.encoder, tsne_iter, class_names, title="t-SNE of Autoencoder Pretrained Embeddings")
+    return save_dir
 
 def _train_model_loop(
     model_class: tp.Type[YatCNN],
@@ -81,5 +136,98 @@ def _train_model_loop(
     pretrained_encoder_path: tp.Optional[str] = None,
     freeze_encoder: bool = False,
 ):
-    # ... (move function body from main.py and update imports)
-    pass 
+    stage = "Fine-tuning with Pretrained Weights" if pretrained_encoder_path else "Training from Scratch"
+    if freeze_encoder and pretrained_encoder_path:
+        stage += " (Encoder Frozen)"
+    print(f"\n🚀 Initializing {model_name} for {stage} on dataset {dataset_name}...")
+    is_path = os.path.isdir(dataset_name)
+    config = dataset_configs.get(dataset_name) if not is_path else dataset_configs.get('custom_folder', fallback_configs)
+    image_size = config.get('input_dim', (64, 64))
+    input_channels = config.get('input_channels', 3)
+    current_num_epochs = config.get('num_epochs', fallback_configs['num_epochs'])
+    current_eval_every = config.get('eval_every', fallback_configs['eval_every'])
+    current_batch_size = config.get('batch_size', fallback_configs['batch_size'])
+    label_smooth = config.get('label_smooth', fallback_configs['label_smooth'])
+    if is_path:
+        split_percentage = config.get('test_split_percentage', 0.2)
+        train_ds, test_ds, class_names, train_size = create_image_folder_dataset(dataset_name, validation_split=split_percentage, seed=42)
+        num_classes = len(class_names)
+        processor = get_image_processor(image_size=image_size, num_channels=input_channels)
+        train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
+        test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
+        train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
+    else: # TFDS logic
+        (train_ds, test_ds), ds_info = tfds.load(
+            dataset_name,
+            split=[config['train_split'], config['test_split']],
+            shuffle_files=True,
+            as_supervised=False,
+            with_info=True,
+        )
+        num_classes = ds_info.features[config['label_key']].num_classes
+        class_names = ds_info.features[config['label_key']].names
+        train_size = ds_info.splits[config['train_split']].num_examples
+        processor = get_tfds_processor(image_size, config['image_key'], config['label_key'])
+        train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
+        test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
+        train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
+    model = model_class(num_classes=num_classes, input_channels=input_channels, rngs=nnx.Rngs(rng_seed))
+    if pretrained_encoder_path:
+        print(f"💾 Loading pretrained encoder weights from {pretrained_encoder_path}...")
+        checkpointer = orbax.PyTreeCheckpointer()
+        abstract_encoder_state = jax.eval_shape(lambda: nnx.state(model, nnx.Param))
+        restored_params = checkpointer.restore(pretrained_encoder_path, item=abstract_encoder_state)
+        nnx.update(model, restored_params)
+        print("✅ Pretrained weights loaded successfully!")
+    if freeze_encoder and pretrained_encoder_path:
+        print("❄️ Freezing encoder weights. Only the final classification layer will be trained.")
+        def path_partition_fn(path: tp.Sequence[tp.Any], value: tp.Any):
+            if path and hasattr(path[0], 'key') and path[0].key == 'out_linear':
+                return 'trainable'
+            return 'frozen'
+        params = nnx.state(model, nnx.Param)
+        param_labels = jax.tree_util.tree_map_with_path(path_partition_fn, params)
+        trainable_tx = optimizer_constructor(learning_rate)
+        frozen_tx = optax.set_to_zero()
+        tx = optax.multi_transform(
+            {'trainable': trainable_tx, 'frozen': frozen_tx},
+            param_labels
+        )
+        optimizer = nnx.Optimizer(model, tx)
+    else:
+        optimizer = nnx.Optimizer(model, optimizer_constructor(learning_rate))
+    metrics_computer = nnx.MultiMetric(accuracy=nnx.metrics.Accuracy(), loss=nnx.metrics.Average('loss'))
+    metrics_history = {'train_loss': [], 'train_accuracy': [], 'test_loss': [], 'test_accuracy': []}
+    steps_per_epoch = train_size // current_batch_size
+    total_steps = current_num_epochs * steps_per_epoch
+    print(f"Starting training for {total_steps} steps...")
+    global_step_counter = 0
+    for epoch in range(current_num_epochs):
+        epoch_train_iter = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
+        pbar = tqdm(epoch_train_iter, total=steps_per_epoch, desc=f"Epoch {epoch + 1}/{current_num_epochs} ({stage})")
+        for batch_data in pbar:
+            train_step(model, optimizer, metrics_computer, batch_data, num_classes=num_classes, label_smoothing=label_smooth)
+            if global_step_counter > 0 and (global_step_counter % current_eval_every == 0 or global_step_counter >= total_steps -1):
+                train_metrics = metrics_computer.compute()
+                metrics_history['train_loss'].append(train_metrics['loss'])
+                metrics_history['train_accuracy'].append(train_metrics['accuracy'])
+                metrics_computer.reset()
+                current_test_iter = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
+                for test_batch in current_test_iter:
+                    eval_step(model, metrics_computer, test_batch, num_classes)
+                test_metrics = metrics_computer.compute()
+                metrics_history['test_loss'].append(test_metrics['loss'])
+                metrics_history['test_accuracy'].append(test_metrics['accuracy'])
+                metrics_computer.reset()
+                pbar.set_postfix({'Train Acc': f"{train_metrics['accuracy']:.4f}", 'Test Acc': f"{test_metrics['accuracy']:.4f}"})
+            global_step_counter += 1
+        if global_step_counter >= total_steps: break
+    print(f"✅ {stage} complete on {dataset_name} after {global_step_counter} steps!")
+    if metrics_history['test_accuracy']:
+        print(f"    Final Test Accuracy: {metrics_history['test_accuracy'][-1]:.4f}")
+    save_dir = os.path.abspath(f"./models/{model_name}_{dataset_name.replace('/', '_')}")
+    state = nnx.state(model)
+    checkpointer = orbax.PyTreeCheckpointer()
+    print(f"💾 Saving final model state to {save_dir}...")
+    checkpointer.save(save_dir, state, force=True)
+    return model, metrics_history, test_ds, class_names 
