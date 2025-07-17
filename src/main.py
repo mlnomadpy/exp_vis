@@ -4,10 +4,21 @@
 import os
 import tensorflow as tf
 import wandb
+import argparse
 from runner import run_training_and_analysis
 
 def main():
-    """Main function to define configurations and run the training and analysis."""
+    parser = argparse.ArgumentParser(description="Run training and analysis pipeline.")
+    parser.add_argument('--dataset', type=str, default='cifar10', help='Dataset name or path')
+    parser.add_argument('--learning_rate', type=float, default=0.01, help='Learning rate')
+    parser.add_argument('--use_pretraining', action='store_true', help='Use autoencoder pretraining')
+    parser.add_argument('--freeze_encoder', action='store_true', help='Freeze encoder during fine-tuning')
+    parser.add_argument('--run_saliency_analysis', action='store_true', help='Run saliency analysis')
+    parser.add_argument('--run_kernel_analysis', action='store_true', help='Run kernel similarity analysis')
+    parser.add_argument('--run_adversarial_analysis', action='store_true', help='Run adversarial robustness analysis')
+    parser.add_argument('--adversarial_epsilon', type=float, default=0.01, help='Epsilon for adversarial attack')
+    args = parser.parse_args()
+
     dataset_configs = {
         'cifar10': {
             'input_channels': 3, 'input_dim': (32, 32), 'label_smooth': 0.1,
@@ -29,19 +40,14 @@ def main():
         'pretrain_epochs': 20, 'pretrain_batch_size': 128,
     }
 
-    learning_rate = 0.01
-
-    # =================================================
-    # CHOOSE YOUR DATASET AND ANALYSIS OPTIONS HERE
-    # =================================================
-    dataset_to_run = 'cifar10'
-    use_pretraining = False
-    freeze_encoder_during_finetune = False
-    run_saliency_analysis = True
-    run_kernel_analysis = True
-    run_adversarial_analysis = True
-    adversarial_epsilon = 0.01
-    # =================================================
+    dataset_to_run = args.dataset
+    learning_rate = args.learning_rate
+    use_pretraining = args.use_pretraining
+    freeze_encoder_during_finetune = args.freeze_encoder
+    run_saliency_analysis = args.run_saliency_analysis
+    run_kernel_analysis = args.run_kernel_analysis
+    run_adversarial_analysis = args.run_adversarial_analysis
+    adversarial_epsilon = args.adversarial_epsilon
 
     is_path = os.path.isdir(dataset_to_run)
     if not is_path and dataset_to_run not in dataset_configs:
