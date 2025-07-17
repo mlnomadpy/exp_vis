@@ -7,6 +7,7 @@ from data import create_image_folder_dataset, get_image_processor, get_tfds_proc
 from models import YatCNN, ConvAutoencoder
 from train import _pretrain_autoencoder_loop, _train_model_loop
 from analysis import plot_training_curves, print_final_metrics, detailed_test_evaluation, plot_confusion_matrix, visualize_tsne, visualize_reconstructions
+from logger import init_wandb, log_metrics
 
 def run_training_and_analysis(
     dataset_name: str,
@@ -69,7 +70,7 @@ def run_training_and_analysis(
     for i, (train_loss, train_acc, test_loss, test_acc) in enumerate(zip(
         metrics_history['train_loss'], metrics_history['train_accuracy'],
         metrics_history['test_loss'], metrics_history['test_accuracy'])):
-        wandb.log({
+        log_metrics({
             'step': i,
             'train_loss': train_loss,
             'train_accuracy': train_acc,

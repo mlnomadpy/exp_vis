@@ -13,6 +13,7 @@ from models import YatCNN, ConvAutoencoder
 from data import create_image_folder_dataset, get_image_processor, get_tfds_processor, augment_for_pretraining, augment_for_finetuning
 import tensorflow_datasets as tfds
 import tensorflow as tf
+from logger import log_metrics
 
 def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0):
     logits = model(batch['image'], training=True)
@@ -230,4 +231,14 @@ def _train_model_loop(
     checkpointer = orbax.PyTreeCheckpointer()
     print(f"💾 Saving final model state to {save_dir}...")
     checkpointer.save(save_dir, state, force=True)
+    for i, (train_loss, train_acc, test_loss, test_acc) in enumerate(zip(
+        metrics_history['train_loss'], metrics_history['train_accuracy'],
+        metrics_history['test_loss'], metrics_history['test_accuracy'])):
+        log_metrics({
+            'step': i,
+            'train_loss': train_loss,
+            'train_accuracy': train_acc,
+            'test_loss': test_loss,
+            'test_accuracy': test_acc,
+        }, step=i)
     return model, metrics_history, test_ds, class_names 
