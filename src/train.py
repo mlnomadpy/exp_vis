@@ -64,16 +64,15 @@ def _pretrain_autoencoder_loop(
     rng_seed: int,
     learning_rate: float,
     optimizer_constructor: tp.Callable,
-    dataset_configs: dict,
+    dataset_config: dict,
     fallback_configs: dict,
 ):
     print(f"\n🚀 Starting Denoising Autoencoder Pretraining for {model_name} on {dataset_name}...")
     is_path = os.path.isdir(dataset_name)
-    config = dataset_configs.get(dataset_name) if not is_path else dataset_configs.get('custom_folder', fallback_configs)
-    image_size = config.get('input_dim', (64, 64))
-    input_channels = config.get('input_channels', 3)
-    current_batch_size = config.get('pretrain_batch_size', fallback_configs['pretrain_batch_size'])
-    current_num_epochs = config.get('pretrain_epochs', fallback_configs['pretrain_epochs'])
+    image_size = dataset_config.get('input_dim', (64, 64))
+    input_channels = dataset_config.get('input_channels', 3)
+    current_batch_size = dataset_config.get('pretrain_batch_size', fallback_configs['pretrain_batch_size'])
+    current_num_epochs = dataset_config.get('pretrain_epochs', fallback_configs['pretrain_epochs'])
     if is_path:
         train_ds, _, class_names, train_size = create_image_folder_dataset(dataset_name, validation_split=0.01, seed=42)
         processor = get_image_processor(image_size=image_size, num_channels=input_channels)
@@ -81,14 +80,14 @@ def _pretrain_autoencoder_loop(
     else: # TFDS
         base_train_ds, ds_info = tfds.load(
             dataset_name,
-            split=config['train_split'],
+            split=dataset_config['train_split'],
             shuffle_files=True,
             as_supervised=False,
             with_info=True,
         )
-        class_names = ds_info.features[config['label_key']].names
-        train_size = ds_info.splits[config['train_split']].num_examples
-        processor = get_tfds_processor(image_size, config['image_key'], config['label_key'])
+        class_names = ds_info.features[dataset_config['label_key']].names
+        train_size = ds_info.splits[dataset_config['train_split']].num_examples
+        processor = get_tfds_processor(image_size, dataset_config['image_key'], dataset_config['label_key'])
         base_train_ds = base_train_ds.map(processor)
     def apply_augmentations(x):
         return {
@@ -132,7 +131,7 @@ def _train_model_loop(
     rng_seed: int,
     learning_rate: float,
     optimizer_constructor: tp.Callable,
-    dataset_configs: dict,
+    dataset_config: dict,
     fallback_configs: dict,
     pretrained_encoder_path: tp.Optional[str] = None,
     freeze_encoder: bool = False,
@@ -142,15 +141,14 @@ def _train_model_loop(
         stage += " (Encoder Frozen)"
     print(f"\n🚀 Initializing {model_name} for {stage} on dataset {dataset_name}...")
     is_path = os.path.isdir(dataset_name)
-    config = dataset_configs.get(dataset_name) if not is_path else dataset_configs.get('custom_folder', fallback_configs)
-    image_size = config.get('input_dim', (64, 64))
-    input_channels = config.get('input_channels', 3)
-    current_num_epochs = config.get('num_epochs', fallback_configs['num_epochs'])
-    current_eval_every = config.get('eval_every', fallback_configs['eval_every'])
-    current_batch_size = config.get('batch_size', fallback_configs['batch_size'])
-    label_smooth = config.get('label_smooth', fallback_configs['label_smooth'])
+    image_size = dataset_config.get('input_dim', (64, 64))
+    input_channels = dataset_config.get('input_channels', 3)
+    current_num_epochs = dataset_config.get('num_epochs', fallback_configs['num_epochs'])
+    current_eval_every = dataset_config.get('eval_every', fallback_configs['eval_every'])
+    current_batch_size = dataset_config.get('batch_size', fallback_configs['batch_size'])
+    label_smooth = dataset_config.get('label_smooth', fallback_configs['label_smooth'])
     if is_path:
-        split_percentage = config.get('test_split_percentage', 0.2)
+        split_percentage = dataset_config.get('test_split_percentage', 0.2)
         train_ds, test_ds, class_names, train_size = create_image_folder_dataset(dataset_name, validation_split=split_percentage, seed=42)
         num_classes = len(class_names)
         processor = get_image_processor(image_size=image_size, num_channels=input_channels)
@@ -160,15 +158,15 @@ def _train_model_loop(
     else: # TFDS logic
         (train_ds, test_ds), ds_info = tfds.load(
             dataset_name,
-            split=[config['train_split'], config['test_split']],
+            split=[dataset_config['train_split'], dataset_config['test_split']],
             shuffle_files=True,
             as_supervised=False,
             with_info=True,
         )
-        num_classes = ds_info.features[config['label_key']].num_classes
-        class_names = ds_info.features[config['label_key']].names
-        train_size = ds_info.splits[config['train_split']].num_examples
-        processor = get_tfds_processor(image_size, config['image_key'], config['label_key'])
+        num_classes = ds_info.features[dataset_config['label_key']].num_classes
+        class_names = ds_info.features[dataset_config['label_key']].names
+        train_size = ds_info.splits[dataset_config['train_split']].num_examples
+        processor = get_tfds_processor(image_size, dataset_config['image_key'], dataset_config['label_key'])
         train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)

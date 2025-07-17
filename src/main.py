@@ -196,7 +196,7 @@ def main():
 
     run_training_and_analysis(
         dataset_name=dataset_to_run,
-        dataset_configs=final_config,
+        dataset_config=final_config,
         fallback_configs=fallback_configs,
         learning_rate=learning_rate,
         use_pretraining=use_pretraining,
