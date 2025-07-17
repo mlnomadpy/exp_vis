@@ -73,6 +73,14 @@ def _pretrain_autoencoder_loop(
     input_channels = dataset_config.get('input_channels', 3)
     current_batch_size = dataset_config.get('pretrain_batch_size', fallback_configs['pretrain_batch_size'])
     current_num_epochs = dataset_config.get('pretrain_epochs', fallback_configs['pretrain_epochs'])
+    
+    # Debug: Print what config values are being used
+    print(f"🔧 Pretraining config values:")
+    print(f"   image_size: {image_size}")
+    print(f"   input_channels: {input_channels}")
+    print(f"   current_batch_size: {current_batch_size}")
+    print(f"   current_num_epochs: {current_num_epochs}")
+    print(f"   Full dataset_config: {dataset_config}")
     if is_path:
         train_ds, _, class_names, train_size = create_image_folder_dataset(dataset_name, validation_split=0.01, seed=42)
         processor = get_image_processor(image_size=image_size, num_channels=input_channels)
@@ -147,6 +155,16 @@ def _train_model_loop(
     current_eval_every = dataset_config.get('eval_every', fallback_configs['eval_every'])
     current_batch_size = dataset_config.get('batch_size', fallback_configs['batch_size'])
     label_smooth = dataset_config.get('label_smooth', fallback_configs['label_smooth'])
+    
+    # Debug: Print what config values are being used
+    print(f"🔧 Training config values:")
+    print(f"   image_size: {image_size}")
+    print(f"   input_channels: {input_channels}")
+    print(f"   current_num_epochs: {current_num_epochs}")
+    print(f"   current_eval_every: {current_eval_every}")
+    print(f"   current_batch_size: {current_batch_size}")
+    print(f"   label_smooth: {label_smooth}")
+    print(f"   Full dataset_config: {dataset_config}")
     if is_path:
         split_percentage = dataset_config.get('test_split_percentage', 0.2)
         train_ds, test_ds, class_names, train_size = create_image_folder_dataset(dataset_name, validation_split=split_percentage, seed=42)

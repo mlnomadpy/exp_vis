@@ -193,6 +193,12 @@ def main():
     print(f"\n🔧 Final configuration for dataset '{dataset_to_run}':")
     for key, value in final_config.items():
         print(f"   {key}: {value}")
+    
+    # Debug: Print CLI arguments that were passed
+    print(f"\n🔧 CLI arguments that were passed:")
+    for arg, value in vars(args).items():
+        if value is not None and arg != 'dataset':
+            print(f"   --{arg}: {value}")
 
     run_training_and_analysis(
         dataset_name=dataset_to_run,
