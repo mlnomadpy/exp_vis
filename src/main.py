@@ -169,6 +169,9 @@ def main():
         return
 
     # --- WANDB INTEGRATION ---
+    # Get the final config that will be used for training
+    final_config = dataset_configs.get(dataset_to_run) if not is_path else dataset_configs.get('custom_folder', fallback_configs)
+    
     wandb.init(
         project="exp_vis",
         config={
@@ -180,13 +183,20 @@ def main():
             "run_kernel_analysis": run_kernel_analysis,
             "run_adversarial_analysis": run_adversarial_analysis,
             "adversarial_epsilon": adversarial_epsilon,
+            # Include the actual dataset config that will be used
+            "dataset_config": final_config,
         }
     )
-    config = wandb.config
+    wandb_config = wandb.config
+
+    # Debug: Print the final configuration being used
+    print(f"\n🔧 Final configuration for dataset '{dataset_to_run}':")
+    for key, value in final_config.items():
+        print(f"   {key}: {value}")
 
     run_training_and_analysis(
         dataset_name=dataset_to_run,
-        dataset_configs=dataset_configs,
+        dataset_configs=final_config,
         fallback_configs=fallback_configs,
         learning_rate=learning_rate,
         use_pretraining=use_pretraining,
