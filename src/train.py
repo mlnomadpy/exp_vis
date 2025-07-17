@@ -9,8 +9,8 @@ from flax import nnx
 from tqdm import tqdm
 import os
 import orbax.checkpoint as orbax
-from .models import YatCNN, ConvAutoencoder
-from .data import create_image_folder_dataset, get_image_processor, get_tfds_processor, augment_for_pretraining, augment_for_finetuning
+from models import YatCNN, ConvAutoencoder
+from data import create_image_folder_dataset, get_image_processor, get_tfds_processor, augment_for_pretraining, augment_for_finetuning
 import tensorflow_datasets as tfds
 import tensorflow as tf
 
