@@ -3,10 +3,10 @@
 # ==============================================================================
 import os
 import wandb
-from src.data import create_image_folder_dataset, get_image_processor, get_tfds_processor, augment_for_pretraining, augment_for_finetuning
-from src.models import YatCNN, ConvAutoencoder
-from src.train import _pretrain_autoencoder_loop, _train_model_loop
-from src.analysis import plot_training_curves, print_final_metrics, detailed_test_evaluation, plot_confusion_matrix, visualize_tsne, visualize_reconstructions
+from data import create_image_folder_dataset, get_image_processor, get_tfds_processor, augment_for_pretraining, augment_for_finetuning
+from models import YatCNN, ConvAutoencoder
+from train import _pretrain_autoencoder_loop, _train_model_loop
+from analysis import plot_training_curves, print_final_metrics, detailed_test_evaluation, plot_confusion_matrix, visualize_tsne, visualize_reconstructions
 
 def run_training_and_analysis(
     dataset_name: str,
@@ -52,13 +52,13 @@ def run_training_and_analysis(
         plot_confusion_matrix(predictions_data, "YatCNN")
     print("\n🔬 STEP 4: Model Interpretability and Robustness Analysis...")
     if run_saliency_analysis:
-        from src.analysis import plot_saliency_maps
+        from analysis import plot_saliency_maps
         plot_saliency_maps(model, test_ds, class_names)
     if run_kernel_analysis:
-        from src.analysis import visualize_kernel_similarity
+        from analysis import visualize_kernel_similarity
         visualize_kernel_similarity(model)
     if run_adversarial_analysis:
-        from src.analysis import test_adversarial_robustness
+        from analysis import test_adversarial_robustness
         adv_test_iter = test_ds.batch(config.get('batch_size')).as_numpy_iterator()
         test_adversarial_robustness(model, adv_test_iter, class_names, epsilon=adversarial_epsilon)
     print("\n🎨 Generating t-SNE plot for the test set representations...")
