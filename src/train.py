@@ -16,6 +16,341 @@ import tensorflow as tf
 from logger import log_metrics
 import numpy as np
 from sklearn.metrics import precision_recall_fscore_support, confusion_matrix, classification_report
+import wandb
+from functools import partial
+
+from analysis import generate_pairwise_visualizations, compute_and_visualize_val_embeddings
+
+# SIMO2 specific imports and functions
+def combined_loss(embeddings, label_batch, indices, epsilon=1/137):
+    """
+    Optimized implementation of SimO contrastive loss.
+    
+    Args:
+        embeddings: normalized embeddings [batch_size, embedding_dim]
+        label_batch: 1 if similar pairs, 0 if dissimilar pairs
+        indices: tuple of arrays indicating which pairs to compare
+        epsilon: small value for numerical stability
+    
+    Returns:
+        Average loss over all pairs
+    """
+    # Extract pairs
+    e1 = embeddings[indices[0]]
+    e2 = embeddings[indices[1]]
+    
+    # Compute dot products and squared distances efficiently
+    dot_products = jnp.sum(e1 * e2, axis=1)
+    dot_product_squared = dot_products ** 2
+    
+    # More efficient squared distance computation
+    squared_distances = jnp.sum((e1 - e2) ** 2, axis=1)
+    
+    # Compute loss based on similarity labels
+    # For similar pairs (label=1): minimize squared distance and maximize dot product
+    # For dissimilar pairs (label=0): maximize squared distance and minimize dot product
+    loss = jnp.exp((1 - 2 * label_batch) * jnp.log1p(dot_product_squared / (epsilon + squared_distances)))
+    # Average loss over all pairs
+    total_loss = jnp.sum(loss)
+    return total_loss
+
+def clip_grads(grads, max_norm):
+    """Clip gradients to prevent exploding gradients."""
+    norm = jnp.sqrt(sum(jnp.sum(g ** 2) for g in jax.tree_util.tree_leaves(grads)))
+    clip_coef = jnp.minimum(max_norm / (norm + 1e-6), 1.0)
+    return jax.tree_util.tree_map(lambda g: g * clip_coef, grads)
+
+def simo2_loss_fn(model, batch, num_classes, k, embedding_dim, indices_for_same, indices_for_means, indices_for_diff, alpha):
+    """SIMO2 loss function."""
+    projected = model(batch, training=True)
+    reshaped_projections = projected.reshape(num_classes, k, embedding_dim)
+
+    mean_embeddings = jnp.mean(reshaped_projections, axis=1)
+    loss = combined_loss(mean_embeddings, 0. + alpha, indices_for_means)
+
+    # We don't need the orthogonality leaning for the similarity
+    same_loss = jnp.sum(jax.vmap(lambda x: combined_loss(x, 1.0, indices_for_same))(reshaped_projections))
+
+    reshaped_projections = jnp.transpose(reshaped_projections, (1, 0, 2))
+
+    # Compute diff_loss using vmap
+    diff_loss = jnp.sum(jax.vmap(lambda x: combined_loss(x, 0. + alpha, indices_for_diff))(reshaped_projections))
+    final_loss = same_loss + loss + diff_loss
+    return final_loss, (projected, same_loss, loss, diff_loss)
+
+@nnx.jit(static_argnames=['num_classes', 'k', 'embedding_dim', 'alpha'])
+def simo2_train_step(model, optimizer, batch, num_classes, k, embedding_dim, indices_for_same, indices_for_means, indices_for_diff, alpha=0.001, max_grad_norm=1.0):
+    """SIMO2 training step."""
+    def loss_fn_wrapped(m, b):
+        return simo2_loss_fn(m, b, num_classes, k, embedding_dim, indices_for_same, indices_for_means, indices_for_diff, alpha)
+    
+    grad_fn = nnx.value_and_grad(loss_fn_wrapped, has_aux=True)
+    (loss, (projected, same_loss, mean_loss, diff_loss)), grads = grad_fn(model, batch)
+    
+    clipped_grads = clip_grads(grads, max_grad_norm)
+    optimizer.update(clipped_grads)
+    
+    return loss, same_loss, mean_loss, diff_loss
+
+def create_simo2_batch_from_dataset(dataset, batch_size, samples_per_class, num_classes, key):
+    """
+    Create a batch for SIMO2 training using the existing dataset infrastructure.
+    
+    Args:
+        dataset: TensorFlow dataset
+        batch_size: Size of the batch
+        samples_per_class: Number of samples per class
+        num_classes: Number of classes
+        key: PRNG key
+        
+    Returns:
+        Tuple of (batch_images, batch_labels)
+    """
+    key1, key2 = jax.random.split(key)
+    
+    # Determine how many classes to sample
+    classes_needed = batch_size // samples_per_class
+    
+    # Ensure we don't try to sample more classes than available
+    classes_needed = min(classes_needed, num_classes)
+    
+    # For datasets with many classes, limit classes per batch
+    if num_classes > 20 and classes_needed > 20:
+        classes_needed = min(classes_needed, 20)
+    
+    # Sample classes
+    sampled_classes = jax.random.choice(key1, jnp.arange(num_classes), 
+                                       shape=(classes_needed,), replace=False)
+    
+    # Convert dataset to numpy for easier manipulation
+    dataset_np = list(dataset.as_numpy_iterator())
+    images = np.array([item['image'] for item in dataset_np])
+    labels = np.array([item['label'] for item in dataset_np])
+    
+    batch_images = []
+    batch_labels = []
+    
+    # Sample samples_per_class examples from each class
+    for i, class_idx in enumerate(sampled_classes):
+        # Get the class index as a Python value
+        class_idx_py = class_idx.item()
+        
+        # Get data for this class
+        class_indices = np.where(labels == class_idx_py)[0]
+        class_images = images[class_indices]
+        
+        # Handle empty class data
+        if len(class_images) == 0:
+            print(f"Warning: Class {class_idx_py} has no samples. Skipping.")
+            continue
+        
+        # Select samples_per_class random samples
+        if len(class_images) >= samples_per_class:
+            # Fold key to get different random numbers for each class
+            class_key = jax.random.fold_in(key2, i)
+            indices = jax.random.choice(class_key, jnp.arange(len(class_images)), 
+                                      shape=(samples_per_class,), replace=False)
+            selected_samples = class_images[indices]
+        else:
+            # If not enough samples, repeat some
+            class_key = jax.random.fold_in(key2, i)
+            indices = jax.random.choice(class_key, jnp.arange(len(class_images)), 
+                                      shape=(samples_per_class,), replace=True)
+            selected_samples = class_images[indices]
+        
+        batch_images.append(selected_samples)
+        batch_labels.extend([class_idx_py] * samples_per_class)
+    
+    # Handle the case where we didn't get any valid samples
+    if len(batch_images) == 0:
+        print("Warning: No valid samples in batch. Creating dummy batch.")
+        # Create a dummy batch with zeros
+        dummy_shape = (batch_size,) + images.shape[1:]
+        batch_images = jnp.zeros(dummy_shape, dtype=jnp.float32)
+        batch_labels = jnp.zeros(batch_size, dtype=jnp.int32)
+    else:
+        # Concatenate all samples into a single batch
+        batch_images = jnp.concatenate(batch_images, axis=0)
+        batch_labels = jnp.array(batch_labels)
+        
+        # If we didn't get enough samples, pad the batch
+        if len(batch_images) < batch_size:
+            print(f"Warning: Only got {len(batch_images)} samples, padding to {batch_size}")
+            # Repeat samples to reach batch_size
+            indices = np.random.choice(len(batch_images), batch_size - len(batch_images), replace=True)
+            pad_images = batch_images[indices]
+            pad_labels = batch_labels[indices]
+            batch_images = jnp.concatenate([batch_images, pad_images], axis=0)
+            batch_labels = jnp.concatenate([batch_labels, pad_labels], axis=0)
+    
+    return batch_images, batch_labels
+
+def _pretrain_simo2_loop(
+    model_name: str,
+    dataset_name: str,
+    rng_seed: int,
+    learning_rate: float,
+    optimizer_constructor: tp.Callable,
+    dataset_config: dict,
+    fallback_configs: dict,
+):
+    """
+    SIMO2 pretraining loop.
+    
+    This implements the SIMO (Self-supervised Image MOdel) pretraining method
+    using the existing data infrastructure and your YatCNN model.
+    """
+    print(f"\n🚀 Starting SIMO2 Pretraining for {model_name} on {dataset_name}...")
+    
+    # Setup wandb
+    wandb.init(project=dataset_config.get('project_name', 'simo2-pretraining'), 
+               tags=['cl', 'simo2'], 
+               config=dataset_config)
+    dataset_config['workdir'] = wandb.run.dir
+    
+    # Set default values for SIMO2
+    embedding_size = dataset_config.get('embedding_size', 16)
+    batch_size = dataset_config.get('batch_size', 256)
+    samples_per_class = dataset_config.get('samples_per_class', 32)
+    num_epochs = dataset_config.get('num_epochs', 100000)
+    orth_lean = dataset_config.get('orth_lean', 1/137)
+    log_rate = dataset_config.get('log_rate', 10000)
+    
+    # Load data using existing infrastructure
+    is_path = os.path.isdir(dataset_name)
+    if is_path:
+        # Custom folder dataset
+        train_ds, val_ds, class_names, train_size = create_image_folder_dataset(
+            dataset_name, validation_split=0.1, seed=42
+        )
+        processor = get_image_processor(
+            image_size=dataset_config.get('input_dim', (64, 64)), 
+            num_channels=dataset_config.get('input_channels', 3)
+        )
+        train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
+        val_ds = val_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
+        num_classes = len(class_names)
+    else:
+        # TFDS dataset
+        (train_ds, val_ds), ds_info = tfds.load(
+            dataset_name,
+            split=['train', 'test'],
+            shuffle_files=True,
+            as_supervised=False,
+            with_info=True,
+        )
+        num_classes = ds_info.features[dataset_config['label_key']].num_classes
+        class_names = ds_info.features[dataset_config['label_key']].names
+        train_size = ds_info.splits['train'].num_examples
+        
+        processor = get_tfds_processor(
+            dataset_config.get('input_dim', (64, 64)), 
+            dataset_config['image_key'], 
+            dataset_config['label_key']
+        )
+        train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
+        val_ds = val_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
+    
+    # Update config with actual values
+    dataset_config['num_classes'] = num_classes
+    dataset_config['dataset'] = dataset_name
+    
+    # Calculate number of classes represented in a batch
+    batch_classes = min(batch_size // samples_per_class, num_classes)
+    print(f"Each batch will contain {batch_classes} different classes with {samples_per_class} samples each")
+    
+    # Prepare indices for loss computation
+    indices_for_same = jnp.triu_indices(samples_per_class, 1)
+    indices_for_means = jnp.triu_indices(batch_classes, 1)
+    indices_for_diff = jnp.triu_indices(batch_classes, 1)
+    
+    # Create SIMO2 model with projection head
+    # We'll use the existing YatCNN as the base model and add a projection head
+    from models import YatCNN
+    
+    # Create a SIMO2 model that includes the base model and projection head
+    class SIMO2Model(nnx.Module):
+        def __init__(self, *, num_classes: int, input_channels: int, embedding_size: int, rngs: nnx.Rngs):
+            self.base_model = YatCNN(num_classes=num_classes, input_channels=input_channels, rngs=rngs)
+            self.projection_head = nnx.Dense(embedding_size, rngs=rngs)
+            
+        def __call__(self, x, training: bool = False):
+            features = self.base_model(x, training=training, return_activations_for_layer='representation')
+            x = self.projection_head(features)
+            # Normalize embeddings
+            x = x / jnp.linalg.norm(x, axis=1, keepdims=True)
+            return x
+    
+    # Initialize model
+    model = SIMO2Model(
+        num_classes=num_classes, 
+        input_channels=dataset_config.get('input_channels', 3), 
+        embedding_size=embedding_size,
+        rngs=nnx.Rngs(rng_seed)
+    )
+    
+    # Setup optimizer
+    optimizer = nnx.Optimizer(model, optimizer_constructor(learning_rate))
+    
+    # Training loop
+    key = jax.random.PRNGKey(rng_seed)
+    
+    for epoch in range(num_epochs):
+        key, subkey = jax.random.split(key)
+        
+        # Create batch for training using existing dataset
+        batch, labels = create_simo2_batch_from_dataset(
+            train_ds, 
+            batch_size, 
+            samples_per_class, 
+            num_classes,
+            subkey
+        )
+        
+        # Perform training step
+        loss, same_loss, mean_loss, diff_loss = simo2_train_step(
+            model, optimizer, batch, 
+            num_classes=batch_classes,
+            k=samples_per_class, 
+            embedding_dim=embedding_size, 
+            indices_for_same=indices_for_same,
+            indices_for_means=indices_for_means, 
+            indices_for_diff=indices_for_diff, 
+            alpha=orth_lean
+        )
+        
+        # Log metrics
+        wandb.log({
+            'Training Loss': float(loss), 
+            'Epoch': epoch+1, 
+            'Similar Loss': float(same_loss), 
+            'Mean Embedding Loss': float(mean_loss), 
+            'Different Loss': float(diff_loss)
+        })
+        
+        # Save model periodically
+        if epoch % log_rate == 0 and epoch != 0:
+            save_dir = os.path.abspath(f"./models/{model_name}_simo2_pretrained")
+            state = nnx.state(model)
+            checkpointer = orbax.PyTreeCheckpointer()
+            print(f"\n💾 Saving SIMO2 pretrained model to {save_dir}...")
+            checkpointer.save(save_dir, state, force=True)
+    
+    # Save final model
+    save_dir = os.path.abspath(f"./models/{model_name}_simo2_pretrained")
+    state = nnx.state(model)
+    checkpointer = orbax.PyTreeCheckpointer()
+    print(f"\n💾 Saving final SIMO2 pretrained model to {save_dir}...")
+    checkpointer.save(save_dir, state, force=True)
+    
+    # Generate and visualize embeddings
+    print("\n=== Generating Embedding Visualizations ===")
+    embeddings, labels = compute_and_visualize_val_embeddings(model, val_ds, dataset_config)
+    
+    wandb.finish()
+    print("SIMO2 pretraining completed!")
+    
+    return save_dir
 
 def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0):
     logits = model(batch['image'], training=True)
@@ -234,8 +569,6 @@ def compute_detailed_metrics(model, test_ds, batch_size: int, num_classes: int, 
         'metrics_file': metrics_file
     }
 
-# The _pretrain_autoencoder_loop and _train_model_loop functions should be moved here as well, with their dependencies updated to use the new module structure.
-# For brevity, only the function signatures and comments are included here. Move the full function bodies from main.py and update imports as needed.
 
 def _pretrain_autoencoder_loop(
     model_name: str,

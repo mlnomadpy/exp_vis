@@ -14,6 +14,9 @@ import jax.numpy as jnp
 from functools import partial
 from flax import nnx
 import optax
+import itertools
+import os
+import wandb
 
 def plot_training_curves(history, model_name):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
@@ -267,3 +270,241 @@ def test_adversarial_robustness(model, test_ds_iter, class_names: list, epsilon:
     plt.suptitle("Adversarial Attack Analysis (FGSM)", fontsize=16, fontweight='bold')
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.show() 
+
+# --- SIMO2 Visualization Functions ---
+
+def generate_pairwise_visualizations(embeddings, labels, config, subset="val"):
+    """
+    Generate pairwise t-SNE and PCA visualizations for all class pairs.
+    
+    Args:
+        embeddings: The embedding vectors (JAX array)
+        labels: The corresponding class labels (JAX array)
+        config: Configuration dictionary
+        subset: Data subset name ('val', 'test') for naming purposes
+    """
+    print(f"Generating pairwise class visualization for {subset} set embeddings...")
+    
+    # Convert JAX arrays to NumPy if needed
+    embeddings_np = np.array(embeddings)
+    labels_np = np.array(labels)
+    
+    # Create directory for pairwise plots
+    plots_dir = os.path.join(config['workdir'], 'plots', 'pairwise')
+    os.makedirs(plots_dir, exist_ok=True)
+    
+    # Get unique classes
+    unique_classes = np.unique(labels_np)
+    num_classes = len(unique_classes)
+    
+    print(f"Found {num_classes} unique classes. Generating {num_classes * (num_classes - 1) // 2} pair visualizations...")
+    
+    # Generate all class pairs
+    class_pairs = list(itertools.combinations(unique_classes, 2))
+    
+    # Calculate how many plots to make per row in the summary figure
+    plots_per_row = min(5, len(class_pairs))
+    num_rows = (len(class_pairs) + plots_per_row - 1) // plots_per_row
+    
+    # Create figures for summary visualization
+    fig_tsne_summary = plt.figure(figsize=(4 * plots_per_row, 4 * num_rows))
+    fig_pca_summary = plt.figure(figsize=(4 * plots_per_row, 4 * num_rows))
+    
+    # Process each class pair
+    for pair_idx, (class_a, class_b) in enumerate(class_pairs):
+        # Get indices for the two classes
+        indices_a = np.where(labels_np == class_a)[0]
+        indices_b = np.where(labels_np == class_b)[0]
+        
+        # Skip if either class has too few samples
+        min_samples = 5
+        if len(indices_a) < min_samples or len(indices_b) < min_samples:
+            print(f"  Skipping pair ({class_a}, {class_b}) - insufficient samples")
+            continue
+        
+        # Combine embeddings and labels for this pair
+        pair_indices = np.concatenate([indices_a, indices_b])
+        pair_embeddings = embeddings_np[pair_indices]
+        pair_labels = labels_np[pair_indices]
+        
+        # Create binary labels for better visualization
+        binary_labels = np.zeros_like(pair_labels)
+        binary_labels[np.where(pair_labels == class_b)[0]] = 1
+        
+        # Perform t-SNE
+        try:
+            tsne = TSNE(n_components=2, random_state=config.get('seed', 42))
+            tsne_result = tsne.fit_transform(pair_embeddings)
+            
+            # Create t-SNE plot
+            plt.figure(figsize=(10, 8))
+            scatter = plt.scatter(
+                tsne_result[:, 0], 
+                tsne_result[:, 1], 
+                c=binary_labels, 
+                cmap='coolwarm', 
+                s=10, 
+                alpha=0.8
+            )
+            plt.colorbar(scatter, label='Class')
+            plt.title(f't-SNE: Class {class_a} vs Class {class_b}')
+            plt.tight_layout()
+            tsne_filename = f'tsne_class_{class_a}_vs_{class_b}_{subset}.png'
+            plt.savefig(os.path.join(plots_dir, tsne_filename), dpi=300)
+            
+            # Add to summary figure
+            ax_summary = fig_tsne_summary.add_subplot(num_rows, plots_per_row, pair_idx + 1)
+            ax_summary.scatter(
+                tsne_result[:, 0], 
+                tsne_result[:, 1], 
+                c=binary_labels, 
+                cmap='coolwarm', 
+                s=5, 
+                alpha=0.8
+            )
+            ax_summary.set_title(f'{class_a} vs {class_b}')
+            ax_summary.set_xticks([])
+            ax_summary.set_yticks([])
+            
+            # Log to wandb
+            wandb.log({f"t-SNE Pair {class_a} vs {class_b}": wandb.Image(plt)})
+            plt.close()
+        except Exception as e:
+            print(f"  Error generating t-SNE for classes {class_a} vs {class_b}: {e}")
+        
+        # Perform PCA
+        try:
+            from sklearn.decomposition import PCA
+            pca = PCA(n_components=2)
+            pca_result = pca.fit_transform(pair_embeddings)
+            
+            # Create PCA plot
+            plt.figure(figsize=(10, 8))
+            scatter = plt.scatter(
+                pca_result[:, 0], 
+                pca_result[:, 1], 
+                c=binary_labels, 
+                cmap='coolwarm', 
+                s=10, 
+                alpha=0.8
+            )
+            plt.colorbar(scatter, label='Class')
+            plt.title(f'PCA: Class {class_a} vs Class {class_b}')
+            plt.xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.2%} variance)')
+            plt.ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.2%} variance)')
+            plt.tight_layout()
+            pca_filename = f'pca_class_{class_a}_vs_{class_b}_{subset}.png'
+            plt.savefig(os.path.join(plots_dir, pca_filename), dpi=300)
+            
+            # Add to summary figure
+            ax_summary = fig_pca_summary.add_subplot(num_rows, plots_per_row, pair_idx + 1)
+            ax_summary.scatter(
+                pca_result[:, 0], 
+                pca_result[:, 1], 
+                c=binary_labels, 
+                cmap='coolwarm', 
+                s=5, 
+                alpha=0.8
+            )
+            ax_summary.set_title(f'{class_a} vs {class_b}')
+            ax_summary.set_xticks([])
+            ax_summary.set_yticks([])
+            
+            # Log to wandb
+            wandb.log({f"PCA Pair {class_a} vs {class_b}": wandb.Image(plt)})
+            plt.close()
+        except Exception as e:
+            print(f"  Error generating PCA for classes {class_a} vs {class_b}: {e}")
+    
+    # Save summary figures
+    plt.figure(fig_tsne_summary.number)
+    plt.tight_layout()
+    plt.savefig(os.path.join(plots_dir, f'tsne_all_pairs_{subset}.png'), dpi=300)
+    wandb.log({f"t-SNE All Pairs Summary ({subset})": wandb.Image(plt)})
+    plt.close()
+    
+    plt.figure(fig_pca_summary.number)
+    plt.tight_layout()
+    plt.savefig(os.path.join(plots_dir, f'pca_all_pairs_{subset}.png'), dpi=300)
+    wandb.log({f"PCA All Pairs Summary ({subset})": wandb.Image(plt)})
+    plt.close()
+    
+    print("Pairwise visualizations complete!")
+
+def compute_and_visualize_val_embeddings(model, val_ds, config):
+    """
+    Compute embeddings for validation set and generate pairwise visualizations.
+    
+    Args:
+        model: The trained model
+        val_ds: Validation dataset
+        config: Configuration dictionary
+        
+    Returns:
+        embeddings, labels: The computed embeddings and their labels
+    """
+    print("Computing embeddings for validation set...")
+    
+    # Get number of classes
+    num_classes = config.get('num_classes', 10)
+    
+    # Convert dataset to numpy for processing
+    val_data = list(val_ds.as_numpy_iterator())
+    val_images = np.array([item['image'] for item in val_data])
+    val_labels = np.array([item['label'] for item in val_data])
+    
+    # Limit total samples for visualization
+    max_total_samples = min(2000, len(val_images))
+    
+    # Select a balanced subset for visualization
+    selected_indices = []
+    selected_labels = []
+    
+    # For datasets with many classes, limit samples per class
+    max_samples_per_class = 200
+    if num_classes > 20:
+        max_samples_per_class = 50
+    
+    # Try to get an equal number from each class
+    for class_idx in range(num_classes):
+        class_indices = np.where(val_labels == class_idx)[0]
+        if len(class_indices) > 0:
+            samples_per_class = min(
+                max_samples_per_class, 
+                len(class_indices),
+                max_total_samples // min(num_classes, 20)
+            )
+            
+            chosen_indices = np.random.choice(class_indices, samples_per_class, replace=False)
+            selected_indices.extend(chosen_indices)
+            selected_labels.extend([class_idx] * samples_per_class)
+    
+    # If not enough samples selected, add more from available classes
+    if len(selected_indices) < max_total_samples:
+        remaining_indices = list(set(range(len(val_labels))) - set(selected_indices))
+        if remaining_indices:
+            additional_count = min(max_total_samples - len(selected_indices), len(remaining_indices))
+            additional_indices = np.random.choice(remaining_indices, additional_count, replace=False)
+            selected_indices.extend(additional_indices)
+            selected_labels.extend(val_labels[additional_indices])
+    
+    # Convert to arrays
+    selected_indices = np.array(selected_indices)
+    y_subset = np.array(selected_labels)
+    x_subset = val_images[selected_indices]
+    
+    # Calculate embeddings in batches
+    batch_size = 100
+    all_embeddings = []
+    for i in range(0, len(x_subset), batch_size):
+        end_idx = min(i + batch_size, len(x_subset))
+        batch = x_subset[i:end_idx]
+        embeddings = model(batch, training=False)
+        all_embeddings.append(embeddings)
+    
+    embeddings = jnp.concatenate(all_embeddings)
+    
+    # Generate pairwise visualizations
+    generate_pairwise_visualizations(embeddings, y_subset, config, subset="val")
+    
+    return embeddings, y_subset 

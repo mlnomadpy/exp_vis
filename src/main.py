@@ -12,6 +12,7 @@ def main():
     parser.add_argument('--dataset', type=str, default='cifar10', help='Dataset name or path')
     parser.add_argument('--learning_rate', type=float, default=0.01, help='Learning rate')
     parser.add_argument('--use_pretraining', action='store_true', help='Use autoencoder pretraining')
+    parser.add_argument('--use_simo2_pretraining', action='store_true', help='Use SIMO2 pretraining')
     parser.add_argument('--freeze_encoder', action='store_true', help='Freeze encoder during fine-tuning')
     parser.add_argument('--run_saliency_analysis', action='store_true', help='Run saliency analysis')
     parser.add_argument('--run_kernel_analysis', action='store_true', help='Run kernel similarity analysis')
@@ -30,6 +31,11 @@ def main():
     parser.add_argument('--label_key', type=str, default=None, help='Label key for TFDS')
     parser.add_argument('--train_split', type=str, default=None, help='Train split for TFDS')
     parser.add_argument('--test_split', type=str, default=None, help='Test split for TFDS')
+    # SIMO2 specific arguments
+    parser.add_argument('--embedding_size', type=int, default=16, help='Embedding size for SIMO2')
+    parser.add_argument('--samples_per_class', type=int, default=32, help='Samples per class for SIMO2')
+    parser.add_argument('--orth_lean', type=float, default=1/137, help='Orthogonality leaning for SIMO2')
+    parser.add_argument('--log_rate', type=int, default=10000, help='Logging rate for SIMO2')
     args = parser.parse_args()
 
     dataset_configs = {
@@ -39,6 +45,9 @@ def main():
             'image_key': 'image', 'label_key': 'label', 
             'num_epochs': 100, 'eval_every': 300, 'batch_size': 256,
             'pretrain_epochs': 100, 'pretrain_batch_size': 256,
+            # SIMO2 specific config
+            'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
+            'num_classes': 10, 'dataset': 'cifar10', 'apply_normalization': True,
         },
         'cifar100': {
             'input_channels': 3, 'input_dim': (32, 32), 'label_smooth': 0.1,
@@ -46,6 +55,9 @@ def main():
             'image_key': 'image', 'label_key': 'label', 
             'num_epochs': 100, 'eval_every': 300, 'batch_size': 256,
             'pretrain_epochs': 100, 'pretrain_batch_size': 256,
+            # SIMO2 specific config
+            'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
+            'num_classes': 100, 'dataset': 'cifar100', 'apply_normalization': True,
         },
         'mnist': {
             'input_channels': 1, 'input_dim': (28, 28), 'label_smooth': 0.1,
@@ -53,6 +65,9 @@ def main():
             'image_key': 'image', 'label_key': 'label', 
             'num_epochs': 50, 'eval_every': 200, 'batch_size': 256,
             'pretrain_epochs': 50, 'pretrain_batch_size': 256,
+            # SIMO2 specific config
+            'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
+            'num_classes': 10, 'dataset': 'mnist', 'apply_normalization': True,
         },
         'fashion_mnist': {
             'input_channels': 1, 'input_dim': (28, 28), 'label_smooth': 0.1,
@@ -60,6 +75,9 @@ def main():
             'image_key': 'image', 'label_key': 'label', 
             'num_epochs': 50, 'eval_every': 200, 'batch_size': 256,
             'pretrain_epochs': 50, 'pretrain_batch_size': 256,
+            # SIMO2 specific config
+            'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
+            'num_classes': 10, 'dataset': 'fashion_mnist', 'apply_normalization': True,
         },
         'imagenet2012': {
             'input_channels': 3, 'input_dim': (224, 224), 'label_smooth': 0.1,
@@ -67,6 +85,9 @@ def main():
             'image_key': 'image', 'label_key': 'label', 
             'num_epochs': 90, 'eval_every': 1000, 'batch_size': 128,
             'pretrain_epochs': 50, 'pretrain_batch_size': 128,
+            # SIMO2 specific config
+            'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
+            'num_classes': 1000, 'dataset': 'imagenet2012', 'apply_normalization': True,
         },
         'caltech101': {
             'input_channels': 3, 'input_dim': (224, 224), 'label_smooth': 0.1,
@@ -74,6 +95,9 @@ def main():
             'image_key': 'image', 'label_key': 'label', 
             'num_epochs': 50, 'eval_every': 200, 'batch_size': 128,
             'pretrain_epochs': 30, 'pretrain_batch_size': 128,
+            # SIMO2 specific config
+            'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
+            'num_classes': 101, 'dataset': 'caltech101', 'apply_normalization': True,
         },
         'oxford_flowers102': {
             'input_channels': 3, 'input_dim': (224, 224), 'label_smooth': 0.1,
@@ -81,6 +105,9 @@ def main():
             'image_key': 'image', 'label_key': 'label', 
             'num_epochs': 50, 'eval_every': 200, 'batch_size': 128,
             'pretrain_epochs': 30, 'pretrain_batch_size': 128,
+            # SIMO2 specific config
+            'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
+            'num_classes': 102, 'dataset': 'oxford_flowers102', 'apply_normalization': True,
         },
         'stanford_dogs': {
             'input_channels': 3, 'input_dim': (224, 224), 'label_smooth': 0.1,
@@ -88,6 +115,9 @@ def main():
             'image_key': 'image', 'label_key': 'label', 
             'num_epochs': 50, 'eval_every': 200, 'batch_size': 128,
             'pretrain_epochs': 30, 'pretrain_batch_size': 128,
+            # SIMO2 specific config
+            'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
+            'num_classes': 120, 'dataset': 'stanford_dogs', 'apply_normalization': True,
         },
         'cats_vs_dogs': {
             'input_channels': 3, 'input_dim': (224, 224), 'label_smooth': 0.1,
@@ -95,6 +125,9 @@ def main():
             'image_key': 'image', 'label_key': 'label', 
             'num_epochs': 30, 'eval_every': 200, 'batch_size': 128,
             'pretrain_epochs': 20, 'pretrain_batch_size': 128,
+            # SIMO2 specific config
+            'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
+            'num_classes': 2, 'dataset': 'cats_vs_dogs', 'apply_normalization': True,
         },
         'stl10': {
             'input_channels': 3, 'input_dim': (96, 96), 'label_smooth': 0.1,
@@ -102,18 +135,26 @@ def main():
             'image_key': 'image', 'label_key': 'label', 
             'num_epochs': 100, 'eval_every': 300, 'batch_size': 128,
             'pretrain_epochs': 50, 'pretrain_batch_size': 128,
+            # SIMO2 specific config
+            'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
+            'num_classes': 10, 'dataset': 'stl10', 'apply_normalization': True,
         },
         'custom_folder': {
             'input_channels': 3, 'input_dim': (32, 32),
             'test_split_percentage': 0.2,
             'num_epochs': 10, 'eval_every': 200, 'batch_size': 128,
             'pretrain_epochs': 100, 'pretrain_batch_size': 256,
+            # SIMO2 specific config (will be updated based on actual data)
+            'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
+            'apply_normalization': True,
         }
     }
 
     fallback_configs = {
         'num_epochs': 10, 'eval_every': 200, 'batch_size': 64, 'label_smooth':0.1,
         'pretrain_epochs': 20, 'pretrain_batch_size': 128,
+        # SIMO2 fallback configs
+        'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
     }
 
     # Update dataset_configs for the selected dataset with CLI args
@@ -148,14 +189,30 @@ def main():
         config['train_split'] = args.train_split
     if args.test_split is not None:
         config['test_split'] = args.test_split
+    # SIMO2 specific argument updates
+    if args.embedding_size is not None:
+        config['embedding_size'] = args.embedding_size
+    if args.samples_per_class is not None:
+        config['samples_per_class'] = args.samples_per_class
+    if args.orth_lean is not None:
+        config['orth_lean'] = args.orth_lean
+    if args.log_rate is not None:
+        config['log_rate'] = args.log_rate
 
     learning_rate = args.learning_rate
     use_pretraining = args.use_pretraining
+    use_simo2_pretraining = args.use_simo2_pretraining
     freeze_encoder_during_finetune = args.freeze_encoder
     run_saliency_analysis = args.run_saliency_analysis
     run_kernel_analysis = args.run_kernel_analysis
     run_adversarial_analysis = args.run_adversarial_analysis
     adversarial_epsilon = args.adversarial_epsilon
+
+    # Validate pretraining options
+    if use_pretraining and use_simo2_pretraining:
+        print("ERROR: Cannot use both autoencoder pretraining and SIMO2 pretraining simultaneously.")
+        print("Please choose either --use_pretraining or --use_simo2_pretraining, not both.")
+        return
 
     is_path = os.path.isdir(dataset_to_run)
     if not is_path and dataset_to_run not in dataset_configs:
@@ -178,6 +235,7 @@ def main():
             "dataset": dataset_to_run,
             "learning_rate": learning_rate,
             "use_pretraining": use_pretraining,
+            "use_simo2_pretraining": use_simo2_pretraining,
             "freeze_encoder": freeze_encoder_during_finetune,
             "run_saliency_analysis": run_saliency_analysis,
             "run_kernel_analysis": run_kernel_analysis,
@@ -206,6 +264,7 @@ def main():
         fallback_configs=fallback_configs,
         learning_rate=learning_rate,
         use_pretraining=use_pretraining,
+        use_simo2_pretraining=use_simo2_pretraining,
         freeze_encoder=freeze_encoder_during_finetune,
         run_saliency_analysis=run_saliency_analysis,
         run_kernel_analysis=run_kernel_analysis,

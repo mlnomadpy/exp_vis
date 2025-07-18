@@ -5,7 +5,7 @@ import os
 import wandb
 from data import create_image_folder_dataset, get_image_processor, get_tfds_processor, augment_for_pretraining, augment_for_finetuning
 from models import YatCNN, ConvAutoencoder
-from train import _pretrain_autoencoder_loop, _train_model_loop
+from train import _pretrain_autoencoder_loop, _train_model_loop, _pretrain_simo2_loop
 from analysis import plot_training_curves, print_final_metrics, detailed_test_evaluation, plot_confusion_matrix, visualize_tsne, visualize_reconstructions
 from logger import init_wandb, log_metrics
 
@@ -15,6 +15,7 @@ def run_training_and_analysis(
     fallback_configs: dict,
     learning_rate: float,
     use_pretraining: bool = True,
+    use_simo2_pretraining: bool = False,
     freeze_encoder: bool = False,
     run_saliency_analysis: bool = True,
     run_kernel_analysis: bool = True,
@@ -24,6 +25,7 @@ def run_training_and_analysis(
     print("\n" + "="*80 + f"\nRUNNING TRAINING & ANALYSIS FOR: {dataset_name.upper()}\n" + "="*80)
     is_path = os.path.isdir(dataset_name)
     pretrained_encoder_path = None
+    
     if use_pretraining:
         print(f"\n🚀 STEP 1: Starting Autoencoder Pretraining...")
         pretrained_encoder_path = _pretrain_autoencoder_loop(
@@ -31,10 +33,21 @@ def run_training_and_analysis(
             rng_seed=42, learning_rate=learning_rate, optimizer_constructor=wandb.config.get('optimizer', None) or __import__('optax').novograd,
             dataset_config=dataset_config, fallback_configs=fallback_configs,
         )
-    if use_pretraining and pretrained_encoder_path is None:
+    elif use_simo2_pretraining:
+        print(f"\n🚀 STEP 1: Starting SIMO2 Pretraining...")
+        pretrained_encoder_path = _pretrain_simo2_loop(
+            model_name="YatCNN", dataset_name=dataset_name,
+            rng_seed=42, learning_rate=learning_rate, optimizer_constructor=wandb.config.get('optimizer', None) or __import__('optax').adam,
+            dataset_config=dataset_config, fallback_configs=fallback_configs,
+        )
+    
+    if (use_pretraining or use_simo2_pretraining) and pretrained_encoder_path is None:
         print("\nPretraining failed or was skipped. Aborting fine-tuning.")
         return
-    print(f"\n🚀 STEP 2: {'Fine-tuning' if use_pretraining else 'Training'} Model...");
+    
+    pretraining_type = "SIMO2" if use_simo2_pretraining else "Autoencoder" if use_pretraining else "None"
+    print(f"\n🚀 STEP 2: {'Fine-tuning' if (use_pretraining or use_simo2_pretraining) else 'Training'} Model ({pretraining_type} pretraining)...");
+    
     model, metrics_history, test_ds, class_names, detailed_metrics = _train_model_loop(
         YatCNN, "YatCNN", dataset_name, 0, learning_rate, __import__('optax').novograd,
         dataset_config=dataset_config, fallback_configs=fallback_configs,
