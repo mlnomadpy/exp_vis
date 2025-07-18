@@ -497,7 +497,7 @@ def _pretrain_simo2_loop(
             'Similar Loss': float(same_loss), 
             'Mean Embedding Loss': float(mean_loss), 
             'Different Loss': float(diff_loss),
-            'Learning Rate': float(optimizer.optimizer.learning_rate(epoch * steps_per_epoch)) if hasattr(optimizer.optimizer, 'learning_rate') else learning_rate
+            'Learning Rate': float(optimizer.learning_rate(epoch * steps_per_epoch)) if hasattr(optimizer, 'learning_rate') else learning_rate
         })
         
         # Save model periodically
@@ -963,7 +963,7 @@ def _train_model_loop(
                 metrics_computer.reset()
                 pbar.set_postfix({'Train Acc': f"{train_metrics['accuracy']:.4f}", 'Test Acc': f"{test_metrics['accuracy']:.4f}"})
                 # Log progress to wandb
-                current_lr = float(optimizer.optimizer.learning_rate(global_step_counter)) if hasattr(optimizer.optimizer, 'learning_rate') else learning_rate
+                current_lr = float(optimizer.learning_rate(global_step_counter)) if hasattr(optimizer, 'learning_rate') else learning_rate
                 log_metrics({
                     'step': global_step_counter,
                     'train_loss': train_metrics['loss'],
