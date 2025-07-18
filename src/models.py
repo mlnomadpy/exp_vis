@@ -38,7 +38,7 @@ class YatConvBlock(nnx.Module):
 
 class YatCNN(nnx.Module):
     def __init__(self, *, num_classes: int, input_channels: int, rngs: nnx.Rngs):
-        self.stem = nnx.Conv(input_channels, 32, kernel_size=(3, 3), strides=(1, 1), use_bias=False, padding='SAME', rngs=rngs)
+        self.stem = YatConv(input_channels, 32, kernel_size=(3, 3), strides=(1, 1), use_bias=False, padding='SAME', rngs=rngs)
 
         self.block1 = YatConvBlock(32, 64, dropout_rate=0.3, pool=True, rngs=rngs)
         self.block2 = YatConvBlock(64, 128, dropout_rate=0.3, pool=True, rngs=rngs)
