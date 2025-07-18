@@ -28,13 +28,6 @@ SCHEDULER_WARMUP_STEPS=100        # For warmup_cosine scheduler
 SCHEDULER_END_VALUE=0.001         # For various schedulers
 SCHEDULER_POWER=1.0               # For polynomial scheduler
 
-# Data augmentation configuration
-AUGMENTATION_TYPE="basic"          # Options: basic, mixup, cutmix, randaugment, random_choice, combined
-MIXUP_ALPHA=0.2                    # Alpha parameter for MixUp
-CUTMIX_ALPHA=0.5                   # Alpha parameter for CutMix
-RANDAUGMENT_MAGNITUDE=0.3          # Magnitude for RandAugment
-RANDAUGMENT_RATE=0.7               # Rate for RandAugment
-
 # Dataset/training config overrides (uncomment and edit as needed)
 # Note: Some datasets have specific defaults:
 # - mnist/fashion_mnist: 1 channel, 28x28, 10 classes
@@ -86,9 +79,4 @@ python src/main.py \
   --scheduler_decay_factor $SCHEDULER_DECAY_FACTOR \
   --scheduler_warmup_steps $SCHEDULER_WARMUP_STEPS \
   --scheduler_end_value $SCHEDULER_END_VALUE \
-  --scheduler_power $SCHEDULER_POWER \
-  --augmentation_type $AUGMENTATION_TYPE \
-  --mixup_alpha $MIXUP_ALPHA \
-  --cutmix_alpha $CUTMIX_ALPHA \
-  --randaugment_magnitude $RANDAUGMENT_MAGNITUDE \
-  --randaugment_rate $RANDAUGMENT_RATE 
+  --scheduler_power $SCHEDULER_POWER 

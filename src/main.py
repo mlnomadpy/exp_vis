@@ -52,15 +52,6 @@ def main():
     parser.add_argument('--scheduler_end_value', type=float, default=None, help='End value for schedulers')
     parser.add_argument('--scheduler_power', type=float, default=1.0, help='Power for polynomial scheduler')
     
-    # Data augmentation arguments
-    parser.add_argument('--augmentation_type', type=str, default='basic',
-                       choices=['basic', 'mixup', 'cutmix', 'randaugment', 'random_choice', 'combined'],
-                       help='Type of data augmentation to use')
-    parser.add_argument('--mixup_alpha', type=float, default=0.2, help='Alpha parameter for MixUp augmentation')
-    parser.add_argument('--cutmix_alpha', type=float, default=0.5, help='Alpha parameter for CutMix augmentation')
-    parser.add_argument('--randaugment_magnitude', type=float, default=0.3, help='Magnitude for RandAugment')
-    parser.add_argument('--randaugment_rate', type=float, default=0.7, help='Rate for RandAugment')
-    
     args = parser.parse_args()
 
     dataset_configs = {
@@ -258,18 +249,6 @@ def main():
     
     if scheduler_params:
         config['scheduler_params'] = scheduler_params
-    
-    # Augmentation argument updates
-    if args.augmentation_type is not None:
-        config['augmentation_type'] = args.augmentation_type
-    if args.mixup_alpha is not None:
-        config['mixup_alpha'] = args.mixup_alpha
-    if args.cutmix_alpha is not None:
-        config['cutmix_alpha'] = args.cutmix_alpha
-    if args.randaugment_magnitude is not None:
-        config['randaugment_magnitude'] = args.randaugment_magnitude
-    if args.randaugment_rate is not None:
-        config['randaugment_rate'] = args.randaugment_rate
 
     learning_rate = args.learning_rate
     use_pretraining = args.use_pretraining
@@ -316,11 +295,6 @@ def main():
             "scheduler_type": args.scheduler_type,
             "optimizer_type": args.optimizer_type,
             "scheduler_params": scheduler_params if 'scheduler_params' in locals() else {},
-            "augmentation_type": args.augmentation_type,
-            "mixup_alpha": args.mixup_alpha,
-            "cutmix_alpha": args.cutmix_alpha,
-            "randaugment_magnitude": args.randaugment_magnitude,
-            "randaugment_rate": args.randaugment_rate,
             # Include the actual dataset config that will be used
             "dataset_config": final_config,
         }
