@@ -874,22 +874,26 @@ def _train_model_loop(
         processor = get_image_processor(image_size=image_size, num_channels=input_channels)
         train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
-        
-        # Apply advanced augmentation if specified
+        # --- Refactored augmentation pipeline ---
+        from data import get_per_image_augmentation_fn, get_batch_augmentation_fn
         augmentation_type = dataset_config.get('augmentation_type', 'basic')
-        if augmentation_type != 'basic':
-            from data import create_advanced_augmentation_pipeline
-            augmentation_fn = create_advanced_augmentation_pipeline(
-                num_classes=num_classes,
-                augmentation_type=augmentation_type,
-                mixup_alpha=dataset_config.get('mixup_alpha', 0.2),
-                cutmix_alpha=dataset_config.get('cutmix_alpha', 0.5),
-                randaugment_magnitude=dataset_config.get('randaugment_magnitude', 0.3),
-                randaugment_rate=dataset_config.get('randaugment_rate', 0.7)
-            )
-            train_ds = train_ds.map(augmentation_fn, num_parallel_calls=tf.data.AUTOTUNE)
-        else:
-            train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
+        per_image_augmentation_fn = get_per_image_augmentation_fn(
+            augmentation_type, num_classes,
+            mixup_alpha=dataset_config.get('mixup_alpha', 0.2),
+            cutmix_alpha=dataset_config.get('cutmix_alpha', 0.5),
+            randaugment_magnitude=dataset_config.get('randaugment_magnitude', 0.3),
+            randaugment_rate=dataset_config.get('randaugment_rate', 0.7)
+        )
+        batch_augmentation_fn = get_batch_augmentation_fn(
+            augmentation_type, num_classes,
+            mixup_alpha=dataset_config.get('mixup_alpha', 0.2),
+            cutmix_alpha=dataset_config.get('cutmix_alpha', 0.5),
+            randaugment_magnitude=dataset_config.get('randaugment_magnitude', 0.3),
+            randaugment_rate=dataset_config.get('randaugment_rate', 0.7)
+        )
+        train_ds = train_ds.map(per_image_augmentation_fn, num_parallel_calls=tf.data.AUTOTUNE)
+        train_ds = train_ds.batch(current_batch_size, drop_remainder=True)
+        train_ds = train_ds.map(batch_augmentation_fn, num_parallel_calls=tf.data.AUTOTUNE)
     else: # TFDS logic
         (train_ds, test_ds), ds_info = tfds.load(
             dataset_name,
@@ -904,22 +908,26 @@ def _train_model_loop(
         processor = get_tfds_processor(image_size, dataset_config['image_key'], dataset_config['label_key'])
         train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
-        
-        # Apply advanced augmentation if specified
+        # --- Refactored augmentation pipeline ---
+        from data import get_per_image_augmentation_fn, get_batch_augmentation_fn
         augmentation_type = dataset_config.get('augmentation_type', 'basic')
-        if augmentation_type != 'basic':
-            from data import create_advanced_augmentation_pipeline
-            augmentation_fn = create_advanced_augmentation_pipeline(
-                num_classes=num_classes,
-                augmentation_type=augmentation_type,
-                mixup_alpha=dataset_config.get('mixup_alpha', 0.2),
-                cutmix_alpha=dataset_config.get('cutmix_alpha', 0.5),
-                randaugment_magnitude=dataset_config.get('randaugment_magnitude', 0.3),
-                randaugment_rate=dataset_config.get('randaugment_rate', 0.7)
-            )
-            train_ds = train_ds.map(augmentation_fn, num_parallel_calls=tf.data.AUTOTUNE)
-        else:
-            train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
+        per_image_augmentation_fn = get_per_image_augmentation_fn(
+            augmentation_type, num_classes,
+            mixup_alpha=dataset_config.get('mixup_alpha', 0.2),
+            cutmix_alpha=dataset_config.get('cutmix_alpha', 0.5),
+            randaugment_magnitude=dataset_config.get('randaugment_magnitude', 0.3),
+            randaugment_rate=dataset_config.get('randaugment_rate', 0.7)
+        )
+        batch_augmentation_fn = get_batch_augmentation_fn(
+            augmentation_type, num_classes,
+            mixup_alpha=dataset_config.get('mixup_alpha', 0.2),
+            cutmix_alpha=dataset_config.get('cutmix_alpha', 0.5),
+            randaugment_magnitude=dataset_config.get('randaugment_magnitude', 0.3),
+            randaugment_rate=dataset_config.get('randaugment_rate', 0.7)
+        )
+        train_ds = train_ds.map(per_image_augmentation_fn, num_parallel_calls=tf.data.AUTOTUNE)
+        train_ds = train_ds.batch(current_batch_size, drop_remainder=True)
+        train_ds = train_ds.map(batch_augmentation_fn, num_parallel_calls=tf.data.AUTOTUNE)
     model = model_class(num_classes=num_classes, input_channels=input_channels, rngs=nnx.Rngs(rng_seed))
     if pretrained_encoder_path:
         print(f"💾 Loading pretrained encoder weights from {pretrained_encoder_path}...")
