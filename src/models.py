@@ -40,11 +40,11 @@ class YatCNN(nnx.Module):
     def __init__(self, *, num_classes: int, input_channels: int, rngs: nnx.Rngs):
         self.stem = nnx.Conv(input_channels, 32, kernel_size=(3, 3), strides=(1, 1), use_bias=False, padding='SAME', rngs=rngs)
 
-        self.block1 = YatConvBlock(32, 64, dropout_rate=0., pool=True, rngs=rngs)
-        self.block2 = YatConvBlock(64, 128, dropout_rate=0., pool=True, rngs=rngs)
-        self.block3 = YatConvBlock(128, 256, dropout_rate=0., pool=True, rngs=rngs)
-        self.block4 = YatConvBlock(256, 512, dropout_rate=0., pool=True, rngs=rngs)
-        self.block5 = YatConvBlock(512, 1024, dropout_rate=0., pool=False, rngs=rngs)
+        self.block1 = YatConvBlock(32, 64, dropout_rate=0.1, pool=True, rngs=rngs)
+        self.block2 = YatConvBlock(64, 128, dropout_rate=0.1, pool=True, rngs=rngs)
+        self.block3 = YatConvBlock(128, 256, dropout_rate=0.1, pool=True, rngs=rngs)
+        self.block4 = YatConvBlock(256, 512, dropout_rate=0.1, pool=True, rngs=rngs)
+        self.block5 = YatConvBlock(512, 1024, dropout_rate=0.3, pool=False, rngs=rngs)
         self.out_linear = YatNMN(1024, num_classes, use_bias=False, rngs=rngs)
         self.rngs = rngs
     def __call__(self, x, training: bool = False, return_activations_for_layer: tp.Optional[str] = None, apply_masking: bool = False, mask_ratio: float = 0.75):
