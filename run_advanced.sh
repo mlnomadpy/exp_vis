@@ -15,6 +15,25 @@ RUN_SALIENCY="--run_saliency_analysis"        # Remove to skip saliency analysis
 RUN_KERNEL="--run_kernel_analysis"            # Remove to skip kernel similarity analysis
 RUN_ADVERSARIAL="--run_adversarial_analysis"  # Remove to skip adversarial robustness analysis
 ADVERSARIAL_EPSILON=0.02
+# --use_simo2_pretraining
+
+# Learning rate scheduler configuration
+SCHEDULER_TYPE="cosine"           # Options: constant, cosine, exponential, step, warmup_cosine, linear, polynomial
+OPTIMIZER_TYPE="novograd"         # Options: adam, adamw, sgd, novograd, rmsprop
+SCHEDULER_ALPHA=0.0               # For cosine scheduler
+SCHEDULER_DECAY_RATE=0.1          # For exponential scheduler
+SCHEDULER_STEP_SIZE=100           # For step scheduler
+SCHEDULER_DECAY_FACTOR=0.5        # For step scheduler
+SCHEDULER_WARMUP_STEPS=100        # For warmup_cosine scheduler
+SCHEDULER_END_VALUE=0.001         # For various schedulers
+SCHEDULER_POWER=1.0               # For polynomial scheduler
+
+# Data augmentation configuration
+AUGMENTATION_TYPE="basic"          # Options: basic, mixup, cutmix, randaugment, random_choice, combined
+MIXUP_ALPHA=0.2                    # Alpha parameter for MixUp
+CUTMIX_ALPHA=0.5                   # Alpha parameter for CutMix
+RANDAUGMENT_MAGNITUDE=0.3          # Magnitude for RandAugment
+RANDAUGMENT_RATE=0.7               # Rate for RandAugment
 
 # Dataset/training config overrides (uncomment and edit as needed)
 # Note: Some datasets have specific defaults:
@@ -58,4 +77,18 @@ python src/main.py \
   --image_key $IMAGE_KEY \
   --label_key $LABEL_KEY \
   --train_split $TRAIN_SPLIT \
-  --test_split $TEST_SPLIT 
+  --test_split $TEST_SPLIT \
+  --scheduler_type $SCHEDULER_TYPE \
+  --optimizer_type $OPTIMIZER_TYPE \
+  --scheduler_alpha $SCHEDULER_ALPHA \
+  --scheduler_decay_rate $SCHEDULER_DECAY_RATE \
+  --scheduler_step_size $SCHEDULER_STEP_SIZE \
+  --scheduler_decay_factor $SCHEDULER_DECAY_FACTOR \
+  --scheduler_warmup_steps $SCHEDULER_WARMUP_STEPS \
+  --scheduler_end_value $SCHEDULER_END_VALUE \
+  --scheduler_power $SCHEDULER_POWER \
+  --augmentation_type $AUGMENTATION_TYPE \
+  --mixup_alpha $MIXUP_ALPHA \
+  --cutmix_alpha $CUTMIX_ALPHA \
+  --randaugment_magnitude $RANDAUGMENT_MAGNITUDE \
+  --randaugment_rate $RANDAUGMENT_RATE 

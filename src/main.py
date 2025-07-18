@@ -36,6 +36,31 @@ def main():
     parser.add_argument('--samples_per_class', type=int, default=32, help='Samples per class for SIMO2')
     parser.add_argument('--orth_lean', type=float, default=1/137, help='Orthogonality leaning for SIMO2')
     parser.add_argument('--log_rate', type=int, default=10000, help='Logging rate for SIMO2')
+    
+    # Learning rate scheduler arguments
+    parser.add_argument('--scheduler_type', type=str, default='constant', 
+                       choices=['constant', 'cosine', 'exponential', 'step', 'warmup_cosine', 'linear', 'polynomial'],
+                       help='Learning rate scheduler type')
+    parser.add_argument('--optimizer_type', type=str, default='novograd',
+                       choices=['adam', 'adamw', 'sgd', 'novograd', 'rmsprop'],
+                       help='Optimizer type')
+    parser.add_argument('--scheduler_alpha', type=float, default=0.0, help='Alpha parameter for cosine scheduler')
+    parser.add_argument('--scheduler_decay_rate', type=float, default=0.1, help='Decay rate for exponential scheduler')
+    parser.add_argument('--scheduler_step_size', type=int, default=None, help='Step size for step scheduler')
+    parser.add_argument('--scheduler_decay_factor', type=float, default=0.1, help='Decay factor for step scheduler')
+    parser.add_argument('--scheduler_warmup_steps', type=int, default=None, help='Warmup steps for warmup_cosine scheduler')
+    parser.add_argument('--scheduler_end_value', type=float, default=None, help='End value for schedulers')
+    parser.add_argument('--scheduler_power', type=float, default=1.0, help='Power for polynomial scheduler')
+    
+    # Data augmentation arguments
+    parser.add_argument('--augmentation_type', type=str, default='basic',
+                       choices=['basic', 'mixup', 'cutmix', 'randaugment', 'random_choice', 'combined'],
+                       help='Type of data augmentation to use')
+    parser.add_argument('--mixup_alpha', type=float, default=0.2, help='Alpha parameter for MixUp augmentation')
+    parser.add_argument('--cutmix_alpha', type=float, default=0.5, help='Alpha parameter for CutMix augmentation')
+    parser.add_argument('--randaugment_magnitude', type=float, default=0.3, help='Magnitude for RandAugment')
+    parser.add_argument('--randaugment_rate', type=float, default=0.7, help='Rate for RandAugment')
+    
     args = parser.parse_args()
 
     dataset_configs = {
@@ -48,6 +73,9 @@ def main():
             # SIMO2 specific config
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 10, 'dataset': 'cifar10', 'apply_normalization': True,
+            # Scheduler config
+            'scheduler_type': 'cosine', 'optimizer_type': 'novograd',
+            'scheduler_params': {'alpha': 0.0},
         },
         'cifar100': {
             'input_channels': 3, 'input_dim': (32, 32), 'label_smooth': 0.1,
@@ -58,6 +86,9 @@ def main():
             # SIMO2 specific config
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 100, 'dataset': 'cifar100', 'apply_normalization': True,
+            # Scheduler config
+            'scheduler_type': 'cosine', 'optimizer_type': 'novograd',
+            'scheduler_params': {'alpha': 0.0},
         },
         'mnist': {
             'input_channels': 1, 'input_dim': (28, 28), 'label_smooth': 0.1,
@@ -68,6 +99,9 @@ def main():
             # SIMO2 specific config
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 10, 'dataset': 'mnist', 'apply_normalization': True,
+            # Scheduler config
+            'scheduler_type': 'cosine', 'optimizer_type': 'novograd',
+            'scheduler_params': {'alpha': 0.0},
         },
         'fashion_mnist': {
             'input_channels': 1, 'input_dim': (28, 28), 'label_smooth': 0.1,
@@ -198,6 +232,44 @@ def main():
         config['orth_lean'] = args.orth_lean
     if args.log_rate is not None:
         config['log_rate'] = args.log_rate
+    
+    # Scheduler and optimizer argument updates
+    if args.scheduler_type is not None:
+        config['scheduler_type'] = args.scheduler_type
+    if args.optimizer_type is not None:
+        config['optimizer_type'] = args.optimizer_type
+    
+    # Build scheduler parameters dictionary
+    scheduler_params = {}
+    if args.scheduler_alpha is not None:
+        scheduler_params['alpha'] = args.scheduler_alpha
+    if args.scheduler_decay_rate is not None:
+        scheduler_params['decay_rate'] = args.scheduler_decay_rate
+    if args.scheduler_step_size is not None:
+        scheduler_params['step_size'] = args.scheduler_step_size
+    if args.scheduler_decay_factor is not None:
+        scheduler_params['decay_factor'] = args.scheduler_decay_factor
+    if args.scheduler_warmup_steps is not None:
+        scheduler_params['warmup_steps'] = args.scheduler_warmup_steps
+    if args.scheduler_end_value is not None:
+        scheduler_params['end_value'] = args.scheduler_end_value
+    if args.scheduler_power is not None:
+        scheduler_params['power'] = args.scheduler_power
+    
+    if scheduler_params:
+        config['scheduler_params'] = scheduler_params
+    
+    # Augmentation argument updates
+    if args.augmentation_type is not None:
+        config['augmentation_type'] = args.augmentation_type
+    if args.mixup_alpha is not None:
+        config['mixup_alpha'] = args.mixup_alpha
+    if args.cutmix_alpha is not None:
+        config['cutmix_alpha'] = args.cutmix_alpha
+    if args.randaugment_magnitude is not None:
+        config['randaugment_magnitude'] = args.randaugment_magnitude
+    if args.randaugment_rate is not None:
+        config['randaugment_rate'] = args.randaugment_rate
 
     learning_rate = args.learning_rate
     use_pretraining = args.use_pretraining
@@ -241,6 +313,14 @@ def main():
             "run_kernel_analysis": run_kernel_analysis,
             "run_adversarial_analysis": run_adversarial_analysis,
             "adversarial_epsilon": adversarial_epsilon,
+            "scheduler_type": args.scheduler_type,
+            "optimizer_type": args.optimizer_type,
+            "scheduler_params": scheduler_params if 'scheduler_params' in locals() else {},
+            "augmentation_type": args.augmentation_type,
+            "mixup_alpha": args.mixup_alpha,
+            "cutmix_alpha": args.cutmix_alpha,
+            "randaugment_magnitude": args.randaugment_magnitude,
+            "randaugment_rate": args.randaugment_rate,
             # Include the actual dataset config that will be used
             "dataset_config": final_config,
         }

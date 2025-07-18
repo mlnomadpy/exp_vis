@@ -21,6 +21,154 @@ from functools import partial
 
 from analysis import generate_pairwise_visualizations, compute_and_visualize_val_embeddings
 
+def create_learning_rate_schedule(
+    scheduler_type: str,
+    learning_rate: float,
+    total_steps: int,
+    **kwargs
+) -> optax.Schedule:
+    """
+    Create a learning rate schedule based on the specified type.
+    
+    Args:
+        scheduler_type: Type of scheduler ('constant', 'cosine', 'exponential', 'step', 'warmup_cosine')
+        learning_rate: Initial learning rate
+        total_steps: Total number of training steps
+        **kwargs: Additional scheduler-specific parameters
+    
+    Returns:
+        optax.Schedule: The learning rate schedule
+    """
+    if scheduler_type == 'constant':
+        return learning_rate
+    
+    elif scheduler_type == 'cosine':
+        return optax.cosine_decay_schedule(
+            init_value=learning_rate,
+            decay_steps=total_steps,
+            alpha=kwargs.get('alpha', 0.0)
+        )
+    
+    elif scheduler_type == 'exponential':
+        return optax.exponential_decay(
+            init_value=learning_rate,
+            transition_steps=total_steps,
+            decay_rate=kwargs.get('decay_rate', 0.1),
+            transition_begin=kwargs.get('transition_begin', 0)
+        )
+    
+    elif scheduler_type == 'step':
+        step_size = kwargs.get('step_size', total_steps // 3)
+        decay_factor = kwargs.get('decay_factor', 0.1)
+        return optax.piecewise_constant_schedule(
+            init_value=learning_rate,
+            boundaries_and_scales={
+                step_size: decay_factor,
+                2 * step_size: decay_factor
+            }
+        )
+    
+    elif scheduler_type == 'warmup_cosine':
+        warmup_steps = kwargs.get('warmup_steps', total_steps // 10)
+        return optax.warmup_cosine_decay_schedule(
+            init_value=0.0,
+            peak_value=learning_rate,
+            warmup_steps=warmup_steps,
+            decay_steps=total_steps,
+            end_value=kwargs.get('end_value', 0.0)
+        )
+    
+    elif scheduler_type == 'linear':
+        return optax.linear_schedule(
+            init_value=learning_rate,
+            end_value=kwargs.get('end_value', learning_rate * 0.01),
+            transition_steps=total_steps
+        )
+    
+    elif scheduler_type == 'polynomial':
+        return optax.polynomial_schedule(
+            init_value=learning_rate,
+            end_value=kwargs.get('end_value', learning_rate * 0.01),
+            power=kwargs.get('power', 1.0),
+            transition_steps=total_steps
+        )
+    
+    else:
+        print(f"⚠️ Unknown scheduler type '{scheduler_type}'. Using constant learning rate.")
+        return learning_rate
+
+def create_optimizer_with_scheduler(
+    optimizer_type: str,
+    learning_rate: float,
+    scheduler_type: str = 'constant',
+    total_steps: int = 1000,
+    **kwargs
+) -> tp.Callable:
+    """
+    Create an optimizer constructor that includes a learning rate schedule.
+    
+    Args:
+        optimizer_type: Type of optimizer ('adam', 'adamw', 'sgd', 'novograd', 'rmsprop')
+        learning_rate: Initial learning rate
+        scheduler_type: Type of learning rate scheduler
+        total_steps: Total number of training steps
+        **kwargs: Additional optimizer and scheduler parameters
+    
+    Returns:
+        Callable: Optimizer constructor function
+    """
+    def optimizer_constructor(lr):
+        # Create the learning rate schedule
+        schedule = create_learning_rate_schedule(
+            scheduler_type=scheduler_type,
+            learning_rate=lr,
+            total_steps=total_steps,
+            **kwargs
+        )
+        
+        # Create the base optimizer
+        if optimizer_type == 'adam':
+            return optax.adam(
+                learning_rate=schedule,
+                b1=kwargs.get('b1', 0.9),
+                b2=kwargs.get('b2', 0.999),
+                eps=kwargs.get('eps', 1e-8)
+            )
+        elif optimizer_type == 'adamw':
+            return optax.adamw(
+                learning_rate=schedule,
+                b1=kwargs.get('b1', 0.9),
+                b2=kwargs.get('b2', 0.999),
+                eps=kwargs.get('eps', 1e-8),
+                weight_decay=kwargs.get('weight_decay', 0.01)
+            )
+        elif optimizer_type == 'sgd':
+            return optax.sgd(
+                learning_rate=schedule,
+                momentum=kwargs.get('momentum', 0.9),
+                nesterov=kwargs.get('nesterov', False)
+            )
+        elif optimizer_type == 'novograd':
+            return optax.novograd(
+                learning_rate=schedule,
+                b1=kwargs.get('b1', 0.9),
+                b2=kwargs.get('b2', 0.999),
+                eps=kwargs.get('eps', 1e-8),
+                weight_decay=kwargs.get('weight_decay', 0.01)
+            )
+        elif optimizer_type == 'rmsprop':
+            return optax.rmsprop(
+                learning_rate=schedule,
+                decay=kwargs.get('decay', 0.9),
+                eps=kwargs.get('eps', 1e-8),
+                momentum=kwargs.get('momentum', 0.0)
+            )
+        else:
+            print(f"⚠️ Unknown optimizer type '{optimizer_type}'. Using Adam.")
+            return optax.adam(learning_rate=schedule)
+    
+    return optimizer_constructor
+
 # SIMO2 specific imports and functions
 def combined_loss(embeddings, label_batch, indices, epsilon=1/137):
     """
@@ -289,7 +437,30 @@ def _pretrain_simo2_loop(
         rngs=nnx.Rngs(rng_seed)
     )
     
-    # Setup optimizer
+    # Setup optimizer with scheduler
+    # Calculate total steps for scheduler
+    steps_per_epoch = train_size // batch_size
+    total_steps = num_epochs * steps_per_epoch
+    
+    # Get scheduler configuration from dataset_config
+    scheduler_type = dataset_config.get('scheduler_type', 'constant')
+    optimizer_type = dataset_config.get('optimizer_type', 'adam')
+    scheduler_params = dataset_config.get('scheduler_params', {})
+    
+    print(f"🔧 Optimizer: {optimizer_type}")
+    print(f"🔧 Scheduler: {scheduler_type}")
+    print(f"🔧 Total steps: {total_steps}")
+    
+    # Create optimizer with scheduler
+    if scheduler_type != 'constant':
+        optimizer_constructor = create_optimizer_with_scheduler(
+            optimizer_type=optimizer_type,
+            learning_rate=learning_rate,
+            scheduler_type=scheduler_type,
+            total_steps=total_steps,
+            **scheduler_params
+        )
+    
     optimizer = nnx.Optimizer(model, optimizer_constructor(learning_rate))
     
     # Training loop
@@ -325,7 +496,8 @@ def _pretrain_simo2_loop(
             'Epoch': epoch+1, 
             'Similar Loss': float(same_loss), 
             'Mean Embedding Loss': float(mean_loss), 
-            'Different Loss': float(diff_loss)
+            'Different Loss': float(diff_loss),
+            'Learning Rate': float(optimizer.optimizer.learning_rate(epoch * steps_per_epoch)) if hasattr(optimizer.optimizer, 'learning_rate') else learning_rate
         })
         
         # Save model periodically
@@ -619,9 +791,27 @@ def _pretrain_autoencoder_loop(
     autoencoder_model = ConvAutoencoder(num_classes=len(class_names), input_channels=input_channels, rngs=nnx.Rngs(rng_seed))
     steps_per_epoch = train_size // current_batch_size
     total_steps = current_num_epochs * steps_per_epoch
-    schedule = optax.cosine_decay_schedule(init_value=learning_rate, decay_steps=total_steps)
-    tx = optimizer_constructor(learning_rate=schedule)
-    optimizer = nnx.Optimizer(autoencoder_model, tx)
+    
+    # Get scheduler configuration from dataset_config
+    scheduler_type = dataset_config.get('scheduler_type', 'cosine')  # Default to cosine for autoencoder
+    optimizer_type = dataset_config.get('optimizer_type', 'novograd')
+    scheduler_params = dataset_config.get('scheduler_params', {})
+    
+    print(f"🔧 Autoencoder Optimizer: {optimizer_type}")
+    print(f"🔧 Autoencoder Scheduler: {scheduler_type}")
+    print(f"🔧 Total steps: {total_steps}")
+    
+    # Create optimizer with scheduler
+    if scheduler_type != 'constant':
+        optimizer_constructor = create_optimizer_with_scheduler(
+            optimizer_type=optimizer_type,
+            learning_rate=learning_rate,
+            scheduler_type=scheduler_type,
+            total_steps=total_steps,
+            **scheduler_params
+        )
+    
+    optimizer = nnx.Optimizer(autoencoder_model, optimizer_constructor(learning_rate))
     print(f"Pre-training for {current_num_epochs} epochs ({total_steps} steps)...")
     for epoch in range(current_num_epochs):
         epoch_train_iter = augmented_train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
@@ -684,7 +874,22 @@ def _train_model_loop(
         processor = get_image_processor(image_size=image_size, num_channels=input_channels)
         train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
-        train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
+        
+        # Apply advanced augmentation if specified
+        augmentation_type = dataset_config.get('augmentation_type', 'basic')
+        if augmentation_type != 'basic':
+            from data import create_advanced_augmentation_pipeline
+            augmentation_fn = create_advanced_augmentation_pipeline(
+                num_classes=num_classes,
+                augmentation_type=augmentation_type,
+                mixup_alpha=dataset_config.get('mixup_alpha', 0.2),
+                cutmix_alpha=dataset_config.get('cutmix_alpha', 0.5),
+                randaugment_magnitude=dataset_config.get('randaugment_magnitude', 0.3),
+                randaugment_rate=dataset_config.get('randaugment_rate', 0.7)
+            )
+            train_ds = train_ds.map(augmentation_fn, num_parallel_calls=tf.data.AUTOTUNE)
+        else:
+            train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
     else: # TFDS logic
         (train_ds, test_ds), ds_info = tfds.load(
             dataset_name,
@@ -699,7 +904,22 @@ def _train_model_loop(
         processor = get_tfds_processor(image_size, dataset_config['image_key'], dataset_config['label_key'])
         train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
-        train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
+        
+        # Apply advanced augmentation if specified
+        augmentation_type = dataset_config.get('augmentation_type', 'basic')
+        if augmentation_type != 'basic':
+            from data import create_advanced_augmentation_pipeline
+            augmentation_fn = create_advanced_augmentation_pipeline(
+                num_classes=num_classes,
+                augmentation_type=augmentation_type,
+                mixup_alpha=dataset_config.get('mixup_alpha', 0.2),
+                cutmix_alpha=dataset_config.get('cutmix_alpha', 0.5),
+                randaugment_magnitude=dataset_config.get('randaugment_magnitude', 0.3),
+                randaugment_rate=dataset_config.get('randaugment_rate', 0.7)
+            )
+            train_ds = train_ds.map(augmentation_fn, num_parallel_calls=tf.data.AUTOTUNE)
+        else:
+            train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
     model = model_class(num_classes=num_classes, input_channels=input_channels, rngs=nnx.Rngs(rng_seed))
     if pretrained_encoder_path:
         print(f"💾 Loading pretrained encoder weights from {pretrained_encoder_path}...")
@@ -708,6 +928,29 @@ def _train_model_loop(
         restored_params = checkpointer.restore(pretrained_encoder_path, item=abstract_encoder_state)
         nnx.update(model, restored_params)
         print("✅ Pretrained weights loaded successfully!")
+    # Setup optimizer with scheduler
+    steps_per_epoch = train_size // current_batch_size
+    total_steps = current_num_epochs * steps_per_epoch
+    
+    # Get scheduler configuration from dataset_config
+    scheduler_type = dataset_config.get('scheduler_type', 'constant')
+    optimizer_type = dataset_config.get('optimizer_type', 'novograd')
+    scheduler_params = dataset_config.get('scheduler_params', {})
+    
+    print(f"🔧 Training Optimizer: {optimizer_type}")
+    print(f"🔧 Training Scheduler: {scheduler_type}")
+    print(f"🔧 Total steps: {total_steps}")
+    
+    # Create optimizer with scheduler
+    if scheduler_type != 'constant':
+        optimizer_constructor = create_optimizer_with_scheduler(
+            optimizer_type=optimizer_type,
+            learning_rate=learning_rate,
+            scheduler_type=scheduler_type,
+            total_steps=total_steps,
+            **scheduler_params
+        )
+    
     if freeze_encoder and pretrained_encoder_path:
         print("❄️ Freezing encoder weights. Only the final classification layer will be trained.")
         def path_partition_fn(path: tp.Sequence[tp.Any], value: tp.Any):
@@ -750,12 +993,14 @@ def _train_model_loop(
                 metrics_computer.reset()
                 pbar.set_postfix({'Train Acc': f"{train_metrics['accuracy']:.4f}", 'Test Acc': f"{test_metrics['accuracy']:.4f}"})
                 # Log progress to wandb
+                current_lr = float(optimizer.optimizer.learning_rate(global_step_counter)) if hasattr(optimizer.optimizer, 'learning_rate') else learning_rate
                 log_metrics({
                     'step': global_step_counter,
                     'train_loss': train_metrics['loss'],
                     'train_accuracy': train_metrics['accuracy'],
                     'test_loss': test_metrics['loss'],
                     'test_accuracy': test_metrics['accuracy'],
+                    'learning_rate': current_lr,
                 }, step=global_step_counter)
             global_step_counter += 1
         if global_step_counter >= total_steps: break
