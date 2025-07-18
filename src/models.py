@@ -63,7 +63,7 @@ class YatCNN(nnx.Module):
 
 class Decoder(nnx.Module):
     def __init__(self, *, output_channels: int, rngs: nnx.Rngs):
-        self.deconv1 = YatConvTranspose(512, 256, kernel_size=(3, 3), strides=(2, 2), padding='SAME', rngs=rngs)
+        self.deconv1 = YatConvTranspose(1024, 256, kernel_size=(3, 3), strides=(2, 2), padding='SAME', rngs=rngs)
         self.deconv2 = YatConvTranspose(256, 128, kernel_size=(3, 3), strides=(2, 2), padding='SAME', rngs=rngs)
         self.deconv3 = YatConvTranspose(128, 64, kernel_size=(3, 3), strides=(2, 2), padding='SAME', rngs=rngs)
         self.deconv4 = YatConvTranspose(64, 32, kernel_size=(3, 3), strides=(2, 2), padding='SAME', rngs=rngs)
