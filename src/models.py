@@ -30,7 +30,7 @@ class YatConvBlock(nnx.Module):
         y = proj
         if self.needs_projection:
             residual = self.residual_proj(residual)
-        y = 0.2 * y + residual
+        y = y + residual
         y = self.dropout(y, deterministic=not training)
         if self.pool:
             y = self.avg_pool(y)
