@@ -14,6 +14,8 @@ from data import create_image_folder_dataset, get_image_processor, get_tfds_proc
 import tensorflow_datasets as tfds
 import tensorflow as tf
 from logger import log_metrics
+import numpy as np
+from sklearn.metrics import precision_recall_fscore_support, confusion_matrix, classification_report
 
 def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0):
     logits = model(batch['image'], training=True)
@@ -54,6 +56,183 @@ def pretrain_autoencoder_step(model: ConvAutoencoder, optimizer: nnx.Optimizer, 
     loss, grads = grad_fn(model, batch)
     optimizer.update(grads)
     return loss
+
+def compute_top_k_accuracy(logits, labels, k=5):
+    """Compute top-k accuracy."""
+    top_k_indices = jnp.argsort(logits, axis=-1)[:, -k:]
+    labels_expanded = jnp.expand_dims(labels, axis=-1)
+    correct = jnp.any(top_k_indices == labels_expanded, axis=-1)
+    return jnp.mean(correct)
+
+def compute_detailed_metrics(model, test_ds, batch_size: int, num_classes: int, class_names: list):
+    """Compute comprehensive evaluation metrics."""
+    print("\n📊 Computing detailed evaluation metrics...")
+    
+    all_predictions = []
+    all_labels = []
+    all_logits = []
+    
+    test_iter = test_ds.batch(batch_size, drop_remainder=False).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
+    
+    for batch in tqdm(test_iter, desc="Evaluating model"):
+        logits = model(batch['image'], training=False)
+        predictions = jnp.argmax(logits, axis=-1)
+        
+        all_predictions.extend(predictions)
+        all_labels.extend(batch['label'])
+        all_logits.extend(logits)
+    
+    # Convert to numpy arrays
+    all_predictions = np.array(all_predictions)
+    all_labels = np.array(all_labels)
+    all_logits = np.array(all_logits)
+    
+    # Compute metrics
+    top1_accuracy = np.mean(all_predictions == all_labels)
+    top5_accuracy = compute_top_k_accuracy(all_logits, all_labels, k=5)
+    
+    # Compute per-class metrics
+    precision, recall, f1, support = precision_recall_fscore_support(
+        all_labels, all_predictions, average='weighted', zero_division=0
+    )
+    
+    # Compute confusion matrix
+    cm = confusion_matrix(all_labels, all_predictions)
+    
+    # Compute per-class accuracy
+    per_class_accuracy = cm.diagonal() / cm.sum(axis=1)
+    
+    # Find worst performing classes
+    worst_classes_idx = np.argsort(per_class_accuracy)[:5]  # Top 5 worst
+    best_classes_idx = np.argsort(per_class_accuracy)[-5:]  # Top 5 best
+    
+    # Print results
+    print(f"\n🎯 Final Evaluation Results:")
+    print(f"   Top-1 Accuracy: {top1_accuracy:.4f} ({top1_accuracy*100:.2f}%)")
+    print(f"   Top-5 Accuracy: {top5_accuracy:.4f} ({top5_accuracy*100:.2f}%)")
+    print(f"   Precision: {precision:.4f}")
+    print(f"   Recall: {recall:.4f}")
+    print(f"   F1-Score: {f1:.4f}")
+    
+    print(f"\n📈 Per-Class Performance:")
+    print(f"   Best performing classes:")
+    for i, idx in enumerate(reversed(best_classes_idx)):
+        class_name = class_names[idx] if idx < len(class_names) else f"Class_{idx}"
+        print(f"     {i+1}. {class_name}: {per_class_accuracy[idx]:.4f} ({per_class_accuracy[idx]*100:.2f}%)")
+    
+    print(f"   Worst performing classes:")
+    for i, idx in enumerate(worst_classes_idx):
+        class_name = class_names[idx] if idx < len(class_names) else f"Class_{idx}"
+        print(f"     {i+1}. {class_name}: {per_class_accuracy[idx]:.4f} ({per_class_accuracy[idx]*100:.2f}%)")
+    
+    # Log detailed metrics
+    metrics_dict = {
+        'final_top1_accuracy': top1_accuracy,
+        'final_top5_accuracy': top5_accuracy,
+        'final_precision': precision,
+        'final_recall': recall,
+        'final_f1_score': f1,
+        'final_macro_avg_accuracy': np.mean(per_class_accuracy),
+        'final_std_accuracy': np.std(per_class_accuracy),
+    }
+    
+    # Add per-class metrics
+    for i, (acc, class_name) in enumerate(zip(per_class_accuracy, class_names)):
+        metrics_dict[f'class_{i}_{class_name}_accuracy'] = acc
+    
+    log_metrics(metrics_dict)
+    
+    # Save detailed metrics to file
+    import json
+    import datetime
+    
+    metrics_summary = {
+        'timestamp': datetime.datetime.now().isoformat(),
+        'top1_accuracy': float(top1_accuracy),
+        'top5_accuracy': float(top5_accuracy),
+        'precision': float(precision),
+        'recall': float(recall),
+        'f1_score': float(f1),
+        'macro_avg_accuracy': float(np.mean(per_class_accuracy)),
+        'std_accuracy': float(np.std(per_class_accuracy)),
+        'per_class_accuracy': {class_names[i]: float(acc) for i, acc in enumerate(per_class_accuracy)},
+        'best_classes': [class_names[i] for i in reversed(best_classes_idx)],
+        'worst_classes': [class_names[i] for i in worst_classes_idx],
+    }
+    
+    # Create metrics directory if it doesn't exist
+    os.makedirs('./metrics', exist_ok=True)
+    
+    # Save metrics to file
+    metrics_file = f"./metrics/detailed_metrics_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    with open(metrics_file, 'w') as f:
+        json.dump(metrics_summary, f, indent=2)
+    
+    print(f"💾 Detailed metrics saved to: {metrics_file}")
+    
+    # Generate confusion matrix visualization
+    try:
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        
+        plt.figure(figsize=(12, 10))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                   xticklabels=class_names, yticklabels=class_names)
+        plt.title('Confusion Matrix')
+        plt.xlabel('Predicted')
+        plt.ylabel('Actual')
+        plt.xticks(rotation=45, ha='right')
+        plt.yticks(rotation=0)
+        plt.tight_layout()
+        
+        # Save confusion matrix plot
+        cm_file = f"./metrics/confusion_matrix_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        plt.savefig(cm_file, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"📊 Confusion matrix saved to: {cm_file}")
+        
+        # Generate per-class accuracy bar plot
+        plt.figure(figsize=(max(12, len(class_names)*0.3), 8))
+        bars = plt.bar(range(len(class_names)), per_class_accuracy)
+        plt.xlabel('Classes')
+        plt.ylabel('Accuracy')
+        plt.title('Per-Class Accuracy')
+        plt.xticks(range(len(class_names)), class_names, rotation=45, ha='right')
+        plt.ylim(0, 1)
+        
+        # Color bars based on performance
+        for i, (bar, acc) in enumerate(zip(bars, per_class_accuracy)):
+            if acc >= 0.8:
+                bar.set_color('green')
+            elif acc >= 0.6:
+                bar.set_color('orange')
+            else:
+                bar.set_color('red')
+        
+        plt.tight_layout()
+        
+        # Save per-class accuracy plot
+        acc_file = f"./metrics/per_class_accuracy_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        plt.savefig(acc_file, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"📈 Per-class accuracy plot saved to: {acc_file}")
+        
+    except ImportError:
+        print("⚠️  matplotlib/seaborn not available. Skipping visualization generation.")
+    
+    return {
+        'top1_accuracy': top1_accuracy,
+        'top5_accuracy': top5_accuracy,
+        'precision': precision,
+        'recall': recall,
+        'f1_score': f1,
+        'per_class_accuracy': per_class_accuracy,
+        'confusion_matrix': cm,
+        'predictions': all_predictions,
+        'labels': all_labels,
+        'logits': all_logits,
+        'metrics_file': metrics_file
+    }
 
 # The _pretrain_autoencoder_loop and _train_model_loop functions should be moved here as well, with their dependencies updated to use the new module structure.
 # For brevity, only the function signatures and comments are included here. Move the full function bodies from main.py and update imports as needed.
@@ -250,11 +429,17 @@ def _train_model_loop(
     print(f"✅ {stage} complete on {dataset_name} after {global_step_counter} steps!")
     if metrics_history['test_accuracy']:
         print(f"    Final Test Accuracy: {metrics_history['test_accuracy'][-1]:.4f}")
+    
+    # Compute comprehensive evaluation metrics
+    detailed_metrics = compute_detailed_metrics(model, test_ds, current_batch_size, num_classes, class_names)
+    
     save_dir = os.path.abspath(f"./models/{model_name}_{dataset_name.replace('/', '_')}")
     state = nnx.state(model)
     checkpointer = orbax.PyTreeCheckpointer()
     print(f"💾 Saving final model state to {save_dir}...")
     checkpointer.save(save_dir, state, force=True)
+    
+    # Log training history
     for i, (train_loss, train_acc, test_loss, test_acc) in enumerate(zip(
         metrics_history['train_loss'], metrics_history['train_accuracy'],
         metrics_history['test_loss'], metrics_history['test_accuracy'])):
@@ -265,4 +450,5 @@ def _train_model_loop(
             'test_loss': test_loss,
             'test_accuracy': test_acc,
         }, step=i)
-    return model, metrics_history, test_ds, class_names 
+    
+    return model, metrics_history, test_ds, class_names, detailed_metrics 

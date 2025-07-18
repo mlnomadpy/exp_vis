@@ -35,7 +35,7 @@ def run_training_and_analysis(
         print("\nPretraining failed or was skipped. Aborting fine-tuning.")
         return
     print(f"\n🚀 STEP 2: {'Fine-tuning' if use_pretraining else 'Training'} Model...");
-    model, metrics_history, test_ds, class_names = _train_model_loop(
+    model, metrics_history, test_ds, class_names, detailed_metrics = _train_model_loop(
         YatCNN, "YatCNN", dataset_name, 0, learning_rate, __import__('optax').novograd,
         dataset_config=dataset_config, fallback_configs=fallback_configs,
         pretrained_encoder_path=pretrained_encoder_path,
@@ -75,4 +75,9 @@ def run_training_and_analysis(
             'test_accuracy': test_acc,
         })
     # Optionally log confusion matrix, t-SNE, or model artifacts here
-    return {'model': model, 'metrics_history': metrics_history, 'predictions_data': predictions_data} 
+    return {
+        'model': model, 
+        'metrics_history': metrics_history, 
+        'predictions_data': predictions_data,
+        'detailed_metrics': detailed_metrics
+    } 

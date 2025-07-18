@@ -6,6 +6,7 @@ keras-cv
 tqdm
 scikit-learn
 seaborn
+matplotlib
 orbax
 optax
 wandb 
