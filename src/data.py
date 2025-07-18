@@ -4,8 +4,16 @@
 import os
 import glob
 import tensorflow as tf
-import keras_cv
 import numpy as np
+
+# Try to import keras_cv and provide helpful error messages
+try:
+    import keras_cv
+    KERAS_CV_AVAILABLE = True
+except ImportError:
+    print("⚠️ keras_cv not available. Advanced augmentations will be disabled.")
+    print("   Install with: pip install keras-cv")
+    KERAS_CV_AVAILABLE = False
 
 # --- For Local Image Folders ---
 def create_image_folder_dataset(path: str, validation_split: float, seed: int):
@@ -70,17 +78,36 @@ def augment_for_pretraining(image: tf.Tensor) -> tf.Tensor:
 ROTATION_LAYER = tf.keras.layers.RandomRotation(
     factor=(-0.1, 0.1), fill_mode='reflect'
 )
-GAUSSIAN_BLUR_LAYER = keras_cv.layers.RandomGaussianBlur(
-    kernel_size=3, factor=(0.0, 1.0)
-)
-CUTOUT_LAYER = keras_cv.layers.RandomCutout(
-    height_factor=0.2, width_factor=0.2
-)
+
+# Initialize Keras CV layers only if available
+if KERAS_CV_AVAILABLE:
+    try:
+        GAUSSIAN_BLUR_LAYER = keras_cv.layers.RandomGaussianBlur(
+            kernel_size=3, factor=(0.0, 1.0)
+        )
+        CUTOUT_LAYER = keras_cv.layers.RandomCutout(
+            height_factor=0.2, width_factor=0.2
+        )
+    except AttributeError:
+        print("⚠️ Some Keras CV layers not available. Using fallback augmentations.")
+        GAUSSIAN_BLUR_LAYER = None
+        CUTOUT_LAYER = None
+else:
+    GAUSSIAN_BLUR_LAYER = None
+    CUTOUT_LAYER = None
 
 # --- Advanced Augmentation Functions ---
 def create_mixup_augmentation(num_classes: int, alpha: float = 0.2):
     """Create MixUp augmentation function."""
-    mixup_layer = keras_cv.layers.preprocessing.MixUp(alpha=alpha)
+    if not KERAS_CV_AVAILABLE:
+        print("⚠️ keras_cv not available. Using basic augmentation.")
+        return augment_for_finetuning
+    
+    try:
+        mixup_layer = keras_cv.layers.MixUp(alpha=alpha)
+    except AttributeError:
+        print("⚠️ MixUp layer not available in this version of Keras CV. Using basic augmentation.")
+        return augment_for_finetuning
     
     def mixup_batch(sample: dict) -> dict:
         image = sample['image']
@@ -103,7 +130,15 @@ def create_mixup_augmentation(num_classes: int, alpha: float = 0.2):
 
 def create_cutmix_augmentation(num_classes: int, alpha: float = 0.5):
     """Create CutMix augmentation function."""
-    cutmix_layer = keras_cv.layers.preprocessing.CutMix(alpha=alpha)
+    if not KERAS_CV_AVAILABLE:
+        print("⚠️ keras_cv not available. Using basic augmentation.")
+        return augment_for_finetuning
+    
+    try:
+        cutmix_layer = keras_cv.layers.CutMix(alpha=alpha)
+    except AttributeError:
+        print("⚠️ CutMix layer not available in this version of Keras CV. Using basic augmentation.")
+        return augment_for_finetuning
     
     def cutmix_batch(sample: dict) -> dict:
         image = sample['image']
@@ -132,14 +167,22 @@ def create_randaugment_pipeline(
     rate: float = 0.7
 ):
     """Create RandAugment pipeline."""
-    layers = keras_cv.layers.RandAugment.get_standard_policy(
-        value_range=value_range,
-        magnitude=magnitude,
-        magnitude_stddev=magnitude_stddev
-    )
+    if not KERAS_CV_AVAILABLE:
+        print("⚠️ keras_cv not available. Using basic augmentation.")
+        return augment_for_finetuning
     
-    # Add additional layers
-    layers = layers[:4] + [keras_cv.layers.preprocessing.RandomCutout(0.5, 0.5)]
+    try:
+        layers = keras_cv.layers.RandAugment.get_standard_policy(
+            value_range=value_range,
+            magnitude=magnitude,
+            magnitude_stddev=magnitude_stddev
+        )
+        
+        # Add additional layers
+        layers = layers[:4] + [keras_cv.layers.RandomCutout(0.5, 0.5)]
+    except AttributeError:
+        print("⚠️ RandAugment layers not available in this version of Keras CV. Using basic augmentation.")
+        return augment_for_finetuning
     
     pipeline = keras_cv.layers.RandomAugmentationPipeline(
         layers=layers,
@@ -171,14 +214,22 @@ def create_random_choice_pipeline(
     magnitude_stddev: float = 0.01
 ):
     """Create RandomChoice augmentation pipeline."""
-    layers = keras_cv.layers.RandAugment.get_standard_policy(
-        value_range=value_range,
-        magnitude=magnitude,
-        magnitude_stddev=magnitude_stddev
-    )
+    if not KERAS_CV_AVAILABLE:
+        print("⚠️ keras_cv not available. Using basic augmentation.")
+        return augment_for_finetuning
     
-    # Add additional layers
-    layers = layers[:4] + [keras_cv.layers.preprocessing.RandomCutout(0.5, 0.5)]
+    try:
+        layers = keras_cv.layers.RandAugment.get_standard_policy(
+            value_range=value_range,
+            magnitude=magnitude,
+            magnitude_stddev=magnitude_stddev
+        )
+        
+        # Add additional layers
+        layers = layers[:4] + [keras_cv.layers.RandomCutout(0.5, 0.5)]
+    except AttributeError:
+        print("⚠️ RandomChoice layers not available in this version of Keras CV. Using basic augmentation.")
+        return augment_for_finetuning
     
     pipeline = keras_cv.layers.RandomChoice(layers=layers)
     
@@ -287,34 +338,38 @@ def augment_for_finetuning(sample: dict) -> dict:
         image = tf.image.grayscale_to_rgb(image)
     
     # Random Gaussian blur
-    if tf.random.uniform([]) > 0.5:
+    if GAUSSIAN_BLUR_LAYER is not None and tf.random.uniform([]) > 0.5:
         image = GAUSSIAN_BLUR_LAYER(image, training=True)
     
     # Random cutout
-    if tf.random.uniform([]) > 0.5:
+    if CUTOUT_LAYER is not None and tf.random.uniform([]) > 0.5:
         image = CUTOUT_LAYER(image, training=True)
     
     # Additional Keras CV augmentations
-    if tf.random.uniform([]) > 0.7:
-        # Random solarization
-        solarize_layer = keras_cv.layers.preprocessing.RandomSolarization(
-            value_range=(0, 1), threshold_factor=0.5
-        )
-        image = solarize_layer(image, training=True)
-    
-    if tf.random.uniform([]) > 0.7:
-        # Random posterization
-        posterize_layer = keras_cv.layers.preprocessing.RandomPosterization(
-            value_range=(0, 1), factor=(4, 8)
-        )
-        image = posterize_layer(image, training=True)
-    
-    if tf.random.uniform([]) > 0.7:
-        # Random equalization
-        equalize_layer = keras_cv.layers.preprocessing.RandomEqualization(
-            value_range=(0, 1)
-        )
-        image = equalize_layer(image, training=True)
+    try:
+        if tf.random.uniform([]) > 0.7:
+            # Random solarization
+            solarize_layer = keras_cv.layers.RandomSolarization(
+                value_range=(0, 1), threshold_factor=0.5
+            )
+            image = solarize_layer(image, training=True)
+        
+        if tf.random.uniform([]) > 0.7:
+            # Random posterization
+            posterize_layer = keras_cv.layers.RandomPosterization(
+                value_range=(0, 1), factor=(4, 8)
+            )
+            image = posterize_layer(image, training=True)
+        
+        if tf.random.uniform([]) > 0.7:
+            # Random equalization
+            equalize_layer = keras_cv.layers.RandomEqualization(
+                value_range=(0, 1)
+            )
+            image = equalize_layer(image, training=True)
+    except AttributeError:
+        # If Keras CV layers are not available, skip these augmentations
+        pass
     
     augmented_image = tf.clip_by_value(image, 0.0, 1.0)
     return {**sample, 'image': augmented_image}

@@ -6,6 +6,7 @@ Experimental Visualization and Training Framework for Computer Vision Models
 
 - **Multiple Training Modes**: Support for autoencoder pretraining, SIMO2 pretraining, and fine-tuning
 - **Comprehensive Learning Rate Schedulers**: 7 different scheduler types with full parameter control
+- **Advanced Data Augmentation**: MixUp, CutMix, RandAugment, and 6 augmentation types with full control
 - **Multiple Optimizers**: Adam, AdamW, SGD, NovoGrad, RMSprop support
 - **Dataset Support**: CIFAR-10/100, MNIST, Fashion MNIST, ImageNet, and custom image folders
 - **Advanced Analysis**: Saliency maps, kernel similarity, adversarial robustness testing
@@ -26,6 +27,19 @@ The framework now includes comprehensive learning rate scheduler support with 7 
 
 See [SCHEDULER_README.md](SCHEDULER_README.md) for detailed documentation and examples.
 
+## Advanced Data Augmentation Support
+
+The framework includes comprehensive data augmentation support with 6 different augmentation types:
+
+- **Basic**: Standard augmentation with brightness, contrast, rotation, etc.
+- **MixUp**: Blends images and labels from different classes
+- **CutMix**: Cuts and pastes image patches
+- **RandAugment**: Automated augmentation pipeline
+- **Random Choice**: Random selection from augmentation set
+- **Combined**: Random choice between all augmentation types
+
+See [AUGMENTATION_README.md](AUGMENTATION_README.md) for detailed documentation and examples.
+
 ## Quick Start
 
 ### Basic Training
@@ -44,6 +58,13 @@ python src/main.py \
   --learning_rate 0.01 \
   --scheduler_type warmup_cosine \
   --scheduler_warmup_steps 100
+
+# Train with MixUp augmentation
+python src/main.py \
+  --dataset cifar10 \
+  --learning_rate 0.01 \
+  --augmentation_type mixup \
+  --mixup_alpha 0.2
 ```
 
 ### Advanced Configuration
@@ -60,9 +81,17 @@ python src/main.py \
 python scheduler_example.py
 ```
 
+### Example Augmentation Configurations
+
+```bash
+# Run augmentation examples
+python augmentation_example.py
+```
+
 ## Documentation
 
 - [SCHEDULER_README.md](SCHEDULER_README.md) - Comprehensive scheduler documentation
+- [AUGMENTATION_README.md](AUGMENTATION_README.md) - Advanced data augmentation documentation
 - [SIMO2_README.md](SIMO2_README.md) - SIMO2 pretraining documentation
 
 ## Installation
