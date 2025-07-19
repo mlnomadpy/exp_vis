@@ -413,7 +413,7 @@ def get_keras_cv_augmenter(augmentation_type: str = 'comprehensive', num_classes
         import keras_cv
         layers = []
         
-        # Basic augmentations (always included)
+        # Basic augmentations (always included) - only for images
         layers.extend([
             keras_cv.layers.RandomFlip(),
             keras_cv.layers.RandomRotation(factor=(-0.1, 0.1), fill_mode='reflect'),
@@ -494,15 +494,131 @@ def augment_with_keras_cv(images, labels, num_classes: int, augmentation_type: s
     if not has_keras_cv:
         return images, labels
     
-    augmenter = get_keras_cv_augmenter(augmentation_type, num_classes)
-    if augmenter is None:
-        return images, labels
+    # First, apply image-only augmentations
+    image_augmenter = get_image_only_augmenter(augmentation_type)
+    if image_augmenter is not None:
+        images = image_augmenter(images)
     
-    # Apply augmentation
-    inputs = {"images": images, "labels": labels}
-    output = augmenter(inputs)
+    # Then, apply mixing augmentations if num_classes is provided
+    if num_classes is not None:
+        mixing_augmenter = get_mixing_augmenter(augmentation_type)
+        if mixing_augmenter is not None:
+            # Convert labels to one-hot for mixing
+            one_hot_labels = tf.one_hot(labels, num_classes)
+            inputs = {"images": images, "labels": one_hot_labels}
+            output = mixing_augmenter(inputs)
+            images = output["images"]
+            labels = output["labels"]  # These will be one-hot
+        else:
+            # If no mixing, keep labels as integers
+            pass
+    else:
+        # No mixing, keep labels as integers
+        pass
     
-    return output["images"], output["labels"]
+    return images, labels
+
+def get_image_only_augmenter(augmentation_type: str = 'comprehensive'):
+    """
+    Get a KerasCV Augmenter with only image augmentations (no mixing).
+    """
+    try:
+        import keras_cv
+        has_keras_cv = True
+    except ImportError:
+        has_keras_cv = False
+    
+    if not has_keras_cv:
+        return None
+    
+    try:
+        import keras_cv
+        layers = []
+        
+        # Basic augmentations (always included) - only for images
+        layers.extend([
+            keras_cv.layers.RandomFlip(),
+            keras_cv.layers.RandomRotation(factor=(-0.1, 0.1), fill_mode='reflect'),
+            keras_cv.layers.RandomTranslation(height_factor=(-0.05, 0.05), width_factor=(-0.05, 0.05), fill_mode='reflect'),
+            keras_cv.layers.RandomZoom(height_factor=(-0.05, 0.05), width_factor=(-0.05, 0.05), fill_mode='reflect'),
+            keras_cv.layers.RandomBrightness(factor=(-0.2, 0.2)),
+            keras_cv.layers.RandomContrast(factor=(-0.2, 0.2), value_range=(0, 1)),
+        ])
+        
+        # Add more aggressive augmentations based on type
+        if augmentation_type == 'aggressive':
+            layers.extend([
+                keras_cv.layers.RandomRotation(factor=(-0.3, 0.3), fill_mode='reflect'),
+                keras_cv.layers.RandomTranslation(height_factor=(-0.2, 0.2), width_factor=(-0.2, 0.2), fill_mode='reflect'),
+                keras_cv.layers.RandomZoom(height_factor=(-0.2, 0.2), width_factor=(-0.2, 0.2), fill_mode='reflect'),
+                keras_cv.layers.RandomBrightness(factor=(-0.4, 0.4)),
+                keras_cv.layers.RandomContrast(factor=(-0.4, 0.4), value_range=(0, 1)),
+                keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 1.0)),
+            ])
+        
+        elif augmentation_type == 'comprehensive':
+            layers.extend([
+                keras_cv.layers.RandomRotation(factor=(-0.2, 0.2), fill_mode='reflect'),
+                keras_cv.layers.RandomTranslation(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='reflect'),
+                keras_cv.layers.RandomZoom(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='reflect'),
+                keras_cv.layers.RandomBrightness(factor=(-0.3, 0.3)),
+                keras_cv.layers.RandomContrast(factor=(-0.3, 0.3), value_range=(0, 1)),
+                keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 0.8)),
+            ])
+        
+        # Light augmentations (already included in basic)
+        elif augmentation_type == 'light':
+            pass  # Use basic augmentations only
+        
+        return keras_cv.layers.Augmenter(layers=layers)
+    
+    except AttributeError as e:
+        print(f"⚠️  Error creating image-only KerasCV augmenter: {e}")
+        return None
+
+def get_mixing_augmenter(augmentation_type: str = 'comprehensive'):
+    """
+    Get a KerasCV Augmenter with only mixing augmentations (CutMix, MixUp).
+    """
+    try:
+        import keras_cv
+        has_keras_cv = True
+    except ImportError:
+        has_keras_cv = False
+    
+    if not has_keras_cv:
+        return None
+    
+    try:
+        import keras_cv
+        layers = []
+        
+        # Add mixing augmentations
+        if augmentation_type == 'aggressive':
+            layers.extend([
+                keras_cv.layers.CutMix(alpha=1.0),
+                keras_cv.layers.MixUp(alpha=0.4),
+            ])
+        elif augmentation_type == 'comprehensive':
+            layers.extend([
+                keras_cv.layers.CutMix(alpha=0.5),
+                keras_cv.layers.MixUp(alpha=0.2),
+            ])
+        elif augmentation_type == 'light':
+            # Light mixing
+            layers.extend([
+                keras_cv.layers.CutMix(alpha=0.3),
+                keras_cv.layers.MixUp(alpha=0.1),
+            ])
+        
+        if layers:
+            return keras_cv.layers.Augmenter(layers=layers)
+        else:
+            return None
+    
+    except AttributeError as e:
+        print(f"⚠️  Error creating mixing KerasCV augmenter: {e}")
+        return None
 
 def process_validation(images, labels, num_classes: int):
     """
@@ -516,8 +632,7 @@ def process_validation(images, labels, num_classes: int):
     Returns:
         Tuple of (images, one_hot_labels)
     """
-    one_hot_labels = tf.one_hot(labels, num_classes)
-    return images, one_hot_labels
+    return images, labels
 
 def create_augmented_dataset(dataset, num_classes: int, mode: str = "train", 
                            augmentation_type: str = 'comprehensive', batch_size: int = 32):
