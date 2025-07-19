@@ -56,7 +56,7 @@ class YatResBlock(nnx.Module):
 class YatCNN(nnx.Module): 
     def __init__(self, *, num_classes: int, input_channels: int, rngs: nnx.Rngs):
         # Initial convolution
-        self.conv1 = nnx.Conv(input_channels, 64, kernel_size=(7, 7), strides=(2, 2), use_bias=False, padding='SAME', rngs=rngs)
+        self.conv1 = nnx.Conv(input_channels, 64, kernel_size=(3, 3), strides=(2, 2), use_bias=False, padding='SAME', rngs=rngs)
         
         # ResNet-18 structure: 4 groups of 2 blocks each
         # Group 1: 64 channels, no stride reduction
