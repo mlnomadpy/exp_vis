@@ -49,7 +49,6 @@ class YatResBlock(nnx.Module):
     def __call__(self, x, training: bool):
         residual = x
         y = self.yat_conv(x)
-        y = self.dropout_yat(y, deterministic=not training)
         y = self.lin_conv(y)
 
         if self.needs_projection:
