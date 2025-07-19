@@ -6,7 +6,7 @@ import wandb
 from data import create_image_folder_dataset, get_image_processor, get_tfds_processor, augment_for_pretraining, augment_for_finetuning
 from models import YatCNN, ConvAutoencoder
 from train import _pretrain_autoencoder_loop, _train_model_loop, _pretrain_simo2_loop
-from analysis import plot_training_curves, print_final_metrics, detailed_test_evaluation, plot_confusion_matrix, visualize_tsne, visualize_reconstructions
+from analysis import plot_training_curves, print_final_metrics, detailed_test_evaluation, plot_confusion_matrix, visualize_tsne, visualize_reconstructions, log_final_artifacts_and_metrics
 from logger import init_wandb, log_metrics
 
 def run_training_and_analysis(
@@ -76,6 +76,10 @@ def run_training_and_analysis(
     tsne_test_iter = test_ds.batch(dataset_config.get('batch_size', fallback_configs['batch_size'])).as_numpy_iterator()
     visualize_tsne(model, tsne_test_iter, class_names, title="t-SNE of Final Model Representations on Test Set")
     print("\n" + "="*80 + f"\nANALYSIS FOR {dataset_name.upper()} COMPLETE! ✅\n" + "="*80)
+    
+    # Log final artifacts and metrics to wandb
+    log_final_artifacts_and_metrics(model, metrics_history, predictions_data, detailed_metrics, "YatCNN", dataset_name)
+    
     # --- WANDB LOGGING ---
     for i, (train_loss, train_acc, test_loss, test_acc) in enumerate(zip(
         metrics_history['train_loss'], metrics_history['train_accuracy'],
@@ -87,7 +91,7 @@ def run_training_and_analysis(
             'test_loss': test_loss,
             'test_accuracy': test_acc,
         })
-    # Optionally log confusion matrix, t-SNE, or model artifacts here
+    
     return {
         'model': model, 
         'metrics_history': metrics_history, 

@@ -17,6 +17,44 @@ import optax
 import itertools
 import os
 import wandb
+import datetime
+
+def save_and_log_figure(fig, filename, wandb_key, plots_dir="./plots"):
+    """
+    Helper function to save a figure to disk and log it to wandb.
+    
+    Args:
+        fig: matplotlib figure object
+        filename: filename to save the figure as
+        wandb_key: key to use when logging to wandb
+        plots_dir: directory to save plots in
+    """
+    try:
+        os.makedirs(plots_dir, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        full_filename = f'{filename}_{timestamp}.png'
+        filepath = os.path.join(plots_dir, full_filename)
+        
+        # Save figure
+        fig.savefig(filepath, dpi=300, bbox_inches='tight')
+        
+        # Log to wandb
+        wandb.log({wandb_key: wandb.Image(fig)})
+        
+        print(f"💾 Figure saved: {filepath}")
+        print(f"📊 Logged to wandb: {wandb_key}")
+    except Exception as e:
+        print(f"⚠️  Error saving/logging figure {filename}: {e}")
+        # Still try to save locally even if wandb fails
+        try:
+            os.makedirs(plots_dir, exist_ok=True)
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            full_filename = f'{filename}_{timestamp}.png'
+            filepath = os.path.join(plots_dir, full_filename)
+            fig.savefig(filepath, dpi=300, bbox_inches='tight')
+            print(f"💾 Figure saved locally: {filepath}")
+        except Exception as e2:
+            print(f"❌ Failed to save figure locally: {e2}")
 
 def plot_training_curves(history, model_name):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
@@ -37,7 +75,12 @@ def plot_training_curves(history, model_name):
     ax2.legend()
     ax2.grid(True, alpha=0.3)
     plt.tight_layout()
+    
+    # Save and log figure
+    save_and_log_figure(plt.gcf(), f'training_curves_{model_name}', f"Training Curves - {model_name}")
+    
     plt.show()
+    plt.close()
 
 def print_final_metrics(history, model_name):
     print(f"\n📊 FINAL METRICS FOR {model_name}" + "\n" + "=" * 40)
@@ -79,7 +122,12 @@ def plot_confusion_matrix(predictions_data, model_name):
     plt.xlabel('Predicted Label')
     plt.ylabel('True Label')
     plt.tight_layout()
+    
+    # Save and log figure
+    save_and_log_figure(plt.gcf(), f'confusion_matrix_{model_name}', f"Confusion Matrix - {model_name}")
+    
     plt.show()
+    plt.close()
 
 def visualize_tsne(encoder, dataset_iter, class_names: list[str], title: str, num_samples: int = 1000):
     print(f"\n🎨 Generating t-SNE plot: {title}...")
@@ -119,7 +167,12 @@ def visualize_tsne(encoder, dataset_iter, class_names: list[str], title: str, nu
     neuron_handle = plt.Line2D([0], [0], marker='*', color='w', label='Class Neuron', markerfacecolor='grey', markeredgecolor='k', markersize=20)
     plt.legend(handles=handles + [neuron_handle], labels=class_names + ['Class Neuron'], title="Classes")
     plt.grid(True, alpha=0.3)
+    
+    # Save and log figure
+    save_and_log_figure(plt.gcf(), f'tsne_{title.replace(" ", "_").replace(":", "")}', f"t-SNE - {title}")
+    
     plt.show()
+    plt.close()
 
 def visualize_reconstructions(autoencoder, dataset_iter, title: str, num_images: int = 8):
     print(f"\n🖼️  Generating image reconstructions: {title}...")
@@ -154,7 +207,12 @@ def visualize_reconstructions(autoencoder, dataset_iter, title: str, num_images:
         ax.get_yaxis().set_visible(False)
     plt.suptitle(title, fontsize=16, fontweight='bold')
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    
+    # Save and log figure
+    save_and_log_figure(plt.gcf(), f'reconstructions_{title.replace(" ", "_").replace(":", "")}', f"Reconstructions - {title}")
+    
     plt.show()
+    plt.close()
 
 # --- Saliency Map Generation ---
 @partial(jax.jit, static_argnames=['model'])
@@ -188,7 +246,12 @@ def plot_saliency_maps(model, test_ds, class_names: list, num_images: int = 5):
         ax.axis('off')
     plt.suptitle("Saliency Map Analysis", fontsize=16, fontweight='bold')
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    
+    # Save and log figure
+    save_and_log_figure(plt.gcf(), 'saliency_maps', "Saliency Maps")
+    
     plt.show()
+    plt.close()
 
 # --- Kernel Similarity ---
 def visualize_kernel_similarity(model):
@@ -200,6 +263,7 @@ def visualize_kernel_similarity(model):
             for layer_name, layer in vars(block).items():
                 if hasattr(layer, 'kernel'):
                     conv_layers[f"{block_name}_{layer_name}"] = layer
+    
     for name, layer in conv_layers.items():
         kernels = np.array(layer.kernel.value)
         num_filters = kernels.shape[3]
@@ -210,7 +274,12 @@ def visualize_kernel_similarity(model):
         plt.title(f"Kernel Cosine Similarity for Layer: {name}", fontweight='bold')
         plt.xlabel("Kernel Index")
         plt.ylabel("Kernel Index")
+        
+        # Save and log figure
+        save_and_log_figure(plt.gcf(), f'kernel_similarity_{name.replace("/", "_")}', f"Kernel Similarity - {name}")
+        
         plt.show()
+        plt.close()
 
 # --- Adversarial Attack (FGSM) ---
 @partial(jax.jit, static_argnames=['model'])
@@ -269,7 +338,13 @@ def test_adversarial_robustness(model, test_ds_iter, class_names: list, epsilon:
         ax.axis('off')
     plt.suptitle("Adversarial Attack Analysis (FGSM)", fontsize=16, fontweight='bold')
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.show() 
+    
+    # Save and log figure
+    save_and_log_figure(plt.gcf(), f'adversarial_attack_epsilon_{epsilon}', f"Adversarial Attack (ε={epsilon})")
+    wandb.log({"Adversarial Accuracy": accuracy})
+    
+    plt.show()
+    plt.close()
 
 # --- SIMO2 Visualization Functions ---
 
@@ -419,14 +494,12 @@ def generate_pairwise_visualizations(embeddings, labels, config, subset="val"):
     # Save summary figures
     plt.figure(fig_tsne_summary.number)
     plt.tight_layout()
-    plt.savefig(os.path.join(plots_dir, f'tsne_all_pairs_{subset}.png'), dpi=300)
-    wandb.log({f"t-SNE All Pairs Summary ({subset})": wandb.Image(plt)})
+    save_and_log_figure(plt.gcf(), f'tsne_all_pairs_{subset}', f"t-SNE All Pairs Summary ({subset})", plots_dir)
     plt.close()
     
     plt.figure(fig_pca_summary.number)
     plt.tight_layout()
-    plt.savefig(os.path.join(plots_dir, f'pca_all_pairs_{subset}.png'), dpi=300)
-    wandb.log({f"PCA All Pairs Summary ({subset})": wandb.Image(plt)})
+    save_and_log_figure(plt.gcf(), f'pca_all_pairs_{subset}', f"PCA All Pairs Summary ({subset})", plots_dir)
     plt.close()
     
     print("Pairwise visualizations complete!")
@@ -508,3 +581,63 @@ def compute_and_visualize_val_embeddings(model, val_ds, config):
     generate_pairwise_visualizations(embeddings, y_subset, config, subset="val")
     
     return embeddings, y_subset 
+
+def log_final_artifacts_and_metrics(model, metrics_history, predictions_data, detailed_metrics, model_name, dataset_name):
+    """
+    Log final model artifacts and comprehensive metrics to wandb.
+    
+    Args:
+        model: The trained model
+        metrics_history: Training history metrics
+        predictions_data: Prediction results from detailed evaluation
+        detailed_metrics: Comprehensive evaluation metrics
+        model_name: Name of the model
+        dataset_name: Name of the dataset
+    """
+    print("\n📊 Logging final artifacts and metrics to wandb...")
+    
+    # Log final training metrics
+    if metrics_history:
+        final_metrics = {
+            'final_train_loss': metrics_history['train_loss'][-1] if metrics_history['train_loss'] else 0,
+            'final_train_accuracy': metrics_history['train_accuracy'][-1] if metrics_history['train_accuracy'] else 0,
+            'final_test_loss': metrics_history['test_loss'][-1] if metrics_history['test_loss'] else 0,
+            'final_test_accuracy': metrics_history['test_accuracy'][-1] if metrics_history['test_accuracy'] else 0,
+        }
+        wandb.log(final_metrics)
+    
+    # Log detailed metrics if available
+    if detailed_metrics:
+        wandb.log({
+            'top1_accuracy': detailed_metrics.get('top1_accuracy', 0),
+            'top5_accuracy': detailed_metrics.get('top5_accuracy', 0),
+            'precision': detailed_metrics.get('precision', 0),
+            'recall': detailed_metrics.get('recall', 0),
+            'f1_score': detailed_metrics.get('f1_score', 0),
+        })
+        
+        # Log per-class accuracy as a table
+        if 'per_class_accuracy' in detailed_metrics:
+            per_class_data = []
+            for i, acc in enumerate(detailed_metrics['per_class_accuracy']):
+                per_class_data.append([f"Class_{i}", acc])
+            
+            wandb.log({
+                "Per-Class Accuracy Table": wandb.Table(
+                    columns=["Class", "Accuracy"],
+                    data=per_class_data
+                )
+            })
+    
+    # Log prediction results if available
+    if predictions_data:
+        # Create confusion matrix table
+        cm = confusion_matrix(predictions_data['true_labels'], predictions_data['predictions'])
+        wandb.log({
+            "Confusion Matrix Table": wandb.Table(
+                columns=["True Label", "Predicted Label", "Count"],
+                data=[[i, j, cm[i, j]] for i in range(cm.shape[0]) for j in range(cm.shape[1]) if cm[i, j] > 0]
+            )
+        })
+    
+    print("✅ Final artifacts and metrics logged to wandb!") 

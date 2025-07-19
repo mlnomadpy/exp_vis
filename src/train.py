@@ -695,6 +695,10 @@ def compute_detailed_metrics(model, test_ds, batch_size: int, num_classes: int, 
         # Save confusion matrix plot
         cm_file = f"./metrics/confusion_matrix_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         plt.savefig(cm_file, dpi=300, bbox_inches='tight')
+        
+        # Log to wandb
+        wandb.log({"Detailed Confusion Matrix": wandb.Image(plt.gcf())})
+        
         plt.close()
         print(f"📊 Confusion matrix saved to: {cm_file}")
         
@@ -721,6 +725,10 @@ def compute_detailed_metrics(model, test_ds, batch_size: int, num_classes: int, 
         # Save per-class accuracy plot
         acc_file = f"./metrics/per_class_accuracy_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         plt.savefig(acc_file, dpi=300, bbox_inches='tight')
+        
+        # Log to wandb
+        wandb.log({"Per-Class Accuracy": wandb.Image(plt.gcf())})
+        
         plt.close()
         print(f"📈 Per-class accuracy plot saved to: {acc_file}")
         
