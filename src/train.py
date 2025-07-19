@@ -591,14 +591,8 @@ def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0, orthog
     
     # Handle both regular integer labels and one-hot labels from KerasCV augmentation
     labels = batch['label']
-    if labels.ndim == 1:
-        # Regular integer labels - convert to one-hot
-        one_hot_labels = jax.nn.one_hot(labels, num_classes=num_classes)
-    elif labels.ndim == 2:
-        # Already one-hot labels (from KerasCV CutMix/MixUp)
-        one_hot_labels = labels
-    else:
-        raise ValueError(f"Unexpected label shape: {labels.shape}")
+    # Regular integer labels - convert to one-hot
+    one_hot_labels = jax.nn.one_hot(labels, num_classes=num_classes)
     
     if label_smoothing > 0:
         smoothed_labels = optax.smooth_labels(one_hot_labels, alpha=label_smoothing)
@@ -638,13 +632,8 @@ def train_step(model, optimizer: nnx.Optimizer, metrics: nnx.MultiMetric, batch,
     
     # Convert labels to integer format for metrics if they're one-hot
     labels = batch['label']
-    if labels.ndim == 2:
-        # Convert one-hot back to integer labels for metrics
-        int_labels = jnp.argmax(labels, axis=-1)
-    else:
-        int_labels = labels
     
-    metrics.update(loss=loss, logits=logits, labels=int_labels, orthogonality_loss=orthogonality_loss)
+    metrics.update(loss=loss, logits=logits, labels=labels, orthogonality_loss=orthogonality_loss)
     optimizer.update(grads)
 
 @nnx.jit(static_argnames=['num_classes'])
@@ -653,13 +642,8 @@ def eval_step(model, metrics: nnx.MultiMetric, batch, num_classes: int):
     
     # Convert labels to integer format for metrics if they're one-hot
     labels = batch['label']
-    if labels.ndim == 2:
-        # Convert one-hot back to integer labels for metrics
-        int_labels = jnp.argmax(labels, axis=-1)
-    else:
-        int_labels = labels
     
-    metrics.update(loss=loss, logits=logits, labels=int_labels, orthogonality_loss=orthogonality_loss)
+    metrics.update(loss=loss, logits=logits, labels=labels, orthogonality_loss=orthogonality_loss)
 
 def autoencoder_loss_fn(model: ConvAutoencoder, batch):
     augmented_image = batch['augmented_image']

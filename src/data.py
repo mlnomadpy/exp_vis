@@ -498,11 +498,8 @@ def augment_with_keras_cv(images, labels, num_classes: int, augmentation_type: s
     if augmenter is None:
         return images, labels
     
-    # Convert labels to one-hot
-    one_hot_labels = tf.one_hot(labels, num_classes)
-    
     # Apply augmentation
-    inputs = {"images": images, "labels": one_hot_labels}
+    inputs = {"images": images, "labels": labels}
     output = augmenter(inputs)
     
     return output["images"], output["labels"]
