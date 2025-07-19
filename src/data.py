@@ -398,11 +398,19 @@ def get_keras_cv_augmenter(augmentation_type: str = 'comprehensive', num_classes
     Returns:
         KerasCV Augmenter layer
     """
-    if not KERAS_CV_AVAILABLE:
+    # Check KerasCV availability at runtime
+    try:
+        import keras_cv
+        has_keras_cv = True
+    except ImportError:
+        has_keras_cv = False
+    
+    if not has_keras_cv:
         print("⚠️  keras_cv not available. Returning None.")
         return None
     
     try:
+        import keras_cv
         layers = []
         
         # Basic augmentations (always included)
@@ -412,7 +420,7 @@ def get_keras_cv_augmenter(augmentation_type: str = 'comprehensive', num_classes
             keras_cv.layers.RandomTranslation(height_factor=(-0.05, 0.05), width_factor=(-0.05, 0.05), fill_mode='reflect'),
             keras_cv.layers.RandomZoom(height_factor=(-0.05, 0.05), width_factor=(-0.05, 0.05), fill_mode='reflect'),
             keras_cv.layers.RandomBrightness(factor=(-0.2, 0.2)),
-            keras_cv.layers.RandomContrast(factor=(0.8, 1.2)),
+            keras_cv.layers.RandomContrast(factor=(0.8, 1.2), value_range=(0, 1)),
         ])
         
         # Add mixing augmentations if num_classes is provided
@@ -429,7 +437,7 @@ def get_keras_cv_augmenter(augmentation_type: str = 'comprehensive', num_classes
                 keras_cv.layers.RandomTranslation(height_factor=(-0.2, 0.2), width_factor=(-0.2, 0.2), fill_mode='reflect'),
                 keras_cv.layers.RandomZoom(height_factor=(-0.2, 0.2), width_factor=(-0.2, 0.2), fill_mode='reflect'),
                 keras_cv.layers.RandomBrightness(factor=(-0.4, 0.4)),
-                keras_cv.layers.RandomContrast(factor=(0.6, 1.4)),
+                keras_cv.layers.RandomContrast(factor=(0.6, 1.4), value_range=(0, 1)),
                 keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 1.0)),
             ])
             if num_classes is not None:
@@ -444,7 +452,7 @@ def get_keras_cv_augmenter(augmentation_type: str = 'comprehensive', num_classes
                 keras_cv.layers.RandomTranslation(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='reflect'),
                 keras_cv.layers.RandomZoom(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='reflect'),
                 keras_cv.layers.RandomBrightness(factor=(-0.3, 0.3)),
-                keras_cv.layers.RandomContrast(factor=(0.7, 1.3)),
+                keras_cv.layers.RandomContrast(factor=(0.7, 1.3), value_range=(0, 1)),
                 keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 0.8)),
             ])
             if num_classes is not None:
@@ -476,7 +484,14 @@ def augment_with_keras_cv(images, labels, num_classes: int, augmentation_type: s
     Returns:
         Tuple of (augmented_images, augmented_labels)
     """
-    if not KERAS_CV_AVAILABLE:
+    # Check KerasCV availability at runtime
+    try:
+        import keras_cv
+        has_keras_cv = True
+    except ImportError:
+        has_keras_cv = False
+    
+    if not has_keras_cv:
         return images, labels
     
     augmenter = get_keras_cv_augmenter(augmentation_type, num_classes)
