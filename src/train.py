@@ -592,13 +592,7 @@ def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0, orthog
     # Handle both regular integer labels and one-hot labels from KerasCV augmentation
     labels = batch['label']
     
-    # Check if labels are already one-hot encoded (from KerasCV CutMix/MixUp)
-    if labels.ndim == 2:
-        # Labels are already one-hot encoded
-        one_hot_labels = labels
-    else:
-        # Regular integer labels - convert to one-hot
-        one_hot_labels = jax.nn.one_hot(labels, num_classes=num_classes)
+    one_hot_labels = jax.nn.one_hot(labels, num_classes=num_classes)
     
     if label_smoothing > 0:
         smoothed_labels = optax.smooth_labels(one_hot_labels, alpha=label_smoothing)

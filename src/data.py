@@ -423,12 +423,6 @@ def get_keras_cv_augmenter(augmentation_type: str = 'comprehensive', num_classes
             keras_cv.layers.RandomContrast(factor=(-0.2, 0.2), value_range=(0, 1)),
         ])
         
-        # Add mixing augmentations if num_classes is provided
-        if num_classes is not None:
-            layers.extend([
-                keras_cv.layers.CutMix(alpha=0.5),
-                keras_cv.layers.MixUp(alpha=0.2),
-            ])
         
         # Add more aggressive augmentations based on type
         if augmentation_type == 'aggressive':
@@ -440,11 +434,6 @@ def get_keras_cv_augmenter(augmentation_type: str = 'comprehensive', num_classes
                 keras_cv.layers.RandomContrast(factor=(-0.4, 0.4), value_range=(0, 1)),
                 keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 1.0)),
             ])
-            if num_classes is not None:
-                layers.extend([
-                    keras_cv.layers.CutMix(alpha=1.0),
-                    keras_cv.layers.MixUp(alpha=0.4),
-                ])
         
         elif augmentation_type == 'comprehensive':
             layers.extend([
@@ -455,11 +444,6 @@ def get_keras_cv_augmenter(augmentation_type: str = 'comprehensive', num_classes
                 keras_cv.layers.RandomContrast(factor=(-0.3, 0.3), value_range=(0, 1)),
                 keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 0.8)),
             ])
-            if num_classes is not None:
-                layers.extend([
-                    keras_cv.layers.CutMix(alpha=0.5),
-                    keras_cv.layers.MixUp(alpha=0.2),
-                ])
         
         # Light augmentations (already included in basic)
         elif augmentation_type == 'light':
