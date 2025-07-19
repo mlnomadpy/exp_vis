@@ -115,18 +115,18 @@ def create_optimizer_with_scheduler(
         **kwargs: Additional optimizer and scheduler parameters
     
     Returns:
-        Callable: Optimizer constructor function
+        Callable: Optimizer constructor function that takes no arguments
     """
-    def optimizer_constructor(lr):
-        # Create the learning rate schedule
-        schedule = create_learning_rate_schedule(
-            scheduler_type=scheduler_type,
-            learning_rate=lr,
-            total_steps=total_steps,
-            **kwargs
-        )
-        
-        # Create the base optimizer
+    # Create the learning rate schedule
+    schedule = create_learning_rate_schedule(
+        scheduler_type=scheduler_type,
+        learning_rate=learning_rate,
+        total_steps=total_steps,
+        **kwargs
+    )
+    
+    def optimizer_constructor():
+        # Create the base optimizer with the pre-configured schedule
         if optimizer_type == 'adam':
             return optax.adam(
                 learning_rate=schedule,
@@ -207,6 +207,41 @@ def clip_grads(grads, max_norm):
     norm = jnp.sqrt(sum(jnp.sum(g ** 2) for g in jax.tree_util.tree_leaves(grads)))
     clip_coef = jnp.minimum(max_norm / (norm + 1e-6), 1.0)
     return jax.tree_util.tree_map(lambda g: g * clip_coef, grads)
+
+def get_current_learning_rate(optimizer, step, scheduler_type, scheduler_constructor=None, base_lr=None):
+    """
+    Get the current learning rate from the optimizer or scheduler.
+    
+    Args:
+        optimizer: The optimizer instance
+        step: Current training step
+        scheduler_type: Type of scheduler being used
+        scheduler_constructor: Constructor function for the scheduler (if available)
+        base_lr: Base learning rate (fallback)
+    
+    Returns:
+        float: Current learning rate
+    """
+    if scheduler_type == 'constant':
+        return base_lr if base_lr is not None else 0.001
+    
+    # Try to get learning rate from scheduler constructor
+    if scheduler_constructor is not None:
+        try:
+            return float(scheduler_constructor().learning_rate(step))
+        except:
+            pass
+    
+    # Try to get from optimizer state
+    try:
+        optimizer_state = optimizer.state
+        if hasattr(optimizer_state, 'learning_rate'):
+            return float(optimizer_state.learning_rate(step))
+    except:
+        pass
+    
+    # Fallback to base learning rate
+    return base_lr if base_lr is not None else 0.001
 
 def simo2_loss_fn(model, batch, num_classes, k, embedding_dim, indices_for_same, indices_for_means, indices_for_diff, alpha):
     """SIMO2 loss function."""
@@ -450,6 +485,19 @@ def _pretrain_simo2_loop(
     print(f"🔧 Optimizer: {optimizer_type}")
     print(f"🔧 Scheduler: {scheduler_type}")
     print(f"🔧 Total steps: {total_steps}")
+    print(f"🔧 Initial learning rate: {learning_rate}")
+    
+    # Test scheduler if not constant
+    if scheduler_type != 'constant':
+        test_scheduler = create_learning_rate_schedule(
+            scheduler_type=scheduler_type,
+            learning_rate=learning_rate,
+            total_steps=total_steps,
+            **scheduler_params
+        )
+        print(f"🔧 Scheduler test - Step 0: {float(test_scheduler(0)):.6f}")
+        print(f"🔧 Scheduler test - Step {total_steps//2}: {float(test_scheduler(total_steps//2)):.6f}")
+        print(f"🔧 Scheduler test - Step {total_steps-1}: {float(test_scheduler(total_steps-1)):.6f}")
     
     # Create optimizer with scheduler
     if scheduler_type != 'constant':
@@ -460,8 +508,10 @@ def _pretrain_simo2_loop(
             total_steps=total_steps,
             **scheduler_params
         )
-    
-    optimizer = nnx.Optimizer(model, optimizer_constructor(learning_rate))
+        optimizer = nnx.Optimizer(model, optimizer_constructor())
+    else:
+        # For constant learning rate, use the original optimizer constructor
+        optimizer = nnx.Optimizer(model, optimizer_constructor(learning_rate))
     
     # Training loop
     key = jax.random.PRNGKey(rng_seed)
@@ -491,13 +541,20 @@ def _pretrain_simo2_loop(
         )
         
         # Log metrics
+        current_step = epoch * steps_per_epoch
+        current_lr = get_current_learning_rate(
+            optimizer, current_step, scheduler_type, 
+            scheduler_constructor=optimizer_constructor if scheduler_type != 'constant' else None,
+            base_lr=learning_rate
+        )
+        
         wandb.log({
             'Training Loss': float(loss), 
             'Epoch': epoch+1, 
             'Similar Loss': float(same_loss), 
             'Mean Embedding Loss': float(mean_loss), 
             'Different Loss': float(diff_loss),
-            'Learning Rate': float(optimizer.learning_rate(epoch * steps_per_epoch)) if hasattr(optimizer, 'learning_rate') else learning_rate
+            'Learning Rate': current_lr
         })
         
         # Save model periodically
@@ -820,18 +877,33 @@ def _pretrain_autoencoder_loop(
     print(f"🔧 Autoencoder Optimizer: {optimizer_type}")
     print(f"🔧 Autoencoder Scheduler: {scheduler_type}")
     print(f"🔧 Total steps: {total_steps}")
+    print(f"🔧 Initial learning rate: {learning_rate}")
+    
+    # Test scheduler if not constant
+    if scheduler_type != 'constant':
+        test_scheduler = create_learning_rate_schedule(
+            scheduler_type=scheduler_type,
+            learning_rate=learning_rate,
+            total_steps=total_steps,
+            **scheduler_params
+        )
+        print(f"🔧 Scheduler test - Step 0: {float(test_scheduler(0)):.6f}")
+        print(f"🔧 Scheduler test - Step {total_steps//2}: {float(test_scheduler(total_steps//2)):.6f}")
+        print(f"🔧 Scheduler test - Step {total_steps-1}: {float(test_scheduler(total_steps-1)):.6f}")
     
     # Create optimizer with scheduler
     if scheduler_type != 'constant':
-        optimizer_constructor = create_optimizer_with_scheduler(
+        scheduler_optimizer_constructor = create_optimizer_with_scheduler(
             optimizer_type=optimizer_type,
             learning_rate=learning_rate,
             scheduler_type=scheduler_type,
             total_steps=total_steps,
             **scheduler_params
         )
-    
-    optimizer = nnx.Optimizer(autoencoder_model, optimizer_constructor(learning_rate))
+        optimizer = nnx.Optimizer(autoencoder_model, scheduler_optimizer_constructor())
+    else:
+        # For constant learning rate, use the original optimizer constructor
+        optimizer = nnx.Optimizer(autoencoder_model, optimizer_constructor(learning_rate))
     print(f"Pre-training for {current_num_epochs} epochs ({total_steps} steps)...")
     for epoch in range(current_num_epochs):
         epoch_train_iter = augmented_train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
@@ -934,10 +1006,23 @@ def _train_model_loop(
     print(f"🔧 Training Optimizer: {optimizer_type}")
     print(f"🔧 Training Scheduler: {scheduler_type}")
     print(f"🔧 Total steps: {total_steps}")
+    print(f"🔧 Initial learning rate: {learning_rate}")
+    
+    # Test scheduler if not constant
+    if scheduler_type != 'constant':
+        test_scheduler = create_learning_rate_schedule(
+            scheduler_type=scheduler_type,
+            learning_rate=learning_rate,
+            total_steps=total_steps,
+            **scheduler_params
+        )
+        print(f"🔧 Scheduler test - Step 0: {float(test_scheduler(0)):.6f}")
+        print(f"🔧 Scheduler test - Step {total_steps//2}: {float(test_scheduler(total_steps//2)):.6f}")
+        print(f"🔧 Scheduler test - Step {total_steps-1}: {float(test_scheduler(total_steps-1)):.6f}")
     
     # Create optimizer with scheduler
     if scheduler_type != 'constant':
-        optimizer_constructor = create_optimizer_with_scheduler(
+        scheduler_optimizer_constructor = create_optimizer_with_scheduler(
             optimizer_type=optimizer_type,
             learning_rate=learning_rate,
             scheduler_type=scheduler_type,
@@ -953,7 +1038,10 @@ def _train_model_loop(
             return 'frozen'
         params = nnx.state(model, nnx.Param)
         param_labels = jax.tree_util.tree_map_with_path(path_partition_fn, params)
-        trainable_tx = optimizer_constructor(learning_rate)
+        if scheduler_type != 'constant':
+            trainable_tx = scheduler_optimizer_constructor()
+        else:
+            trainable_tx = optimizer_constructor(learning_rate)
         frozen_tx = optax.set_to_zero()
         tx = optax.multi_transform(
             {'trainable': trainable_tx, 'frozen': frozen_tx},
@@ -961,7 +1049,10 @@ def _train_model_loop(
         )
         optimizer = nnx.Optimizer(model, tx)
     else:
-        optimizer = nnx.Optimizer(model, optimizer_constructor(learning_rate))
+        if scheduler_type != 'constant':
+            optimizer = nnx.Optimizer(model, scheduler_optimizer_constructor())
+        else:
+            optimizer = nnx.Optimizer(model, optimizer_constructor(learning_rate))
     metrics_computer = nnx.MultiMetric(
         accuracy=nnx.metrics.Accuracy(), 
         loss=nnx.metrics.Average('loss'),
@@ -991,7 +1082,12 @@ def _train_model_loop(
                 metrics_computer.reset()
                 pbar.set_postfix({'Train Acc': f"{train_metrics['accuracy']:.4f}", 'Test Acc': f"{test_metrics['accuracy']:.4f}"})
                 # Log progress to wandb
-                current_lr = float(optimizer.learning_rate(global_step_counter)) if hasattr(optimizer, 'learning_rate') else learning_rate
+                current_lr = get_current_learning_rate(
+                    optimizer, global_step_counter, scheduler_type,
+                    scheduler_constructor=scheduler_optimizer_constructor if scheduler_type != 'constant' else None,
+                    base_lr=learning_rate
+                )
+                
                 log_metrics({
                     'step': global_step_counter,
                     'train_loss': train_metrics['loss'],
