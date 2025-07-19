@@ -53,6 +53,15 @@ def main():
     parser.add_argument('--scheduler_power', type=float, default=1.0, help='Power for polynomial scheduler')
     parser.add_argument('--orthogonality_weight', type=float, default=0.0, help='Weight for orthogonality regularization of output layer')
     
+    # Augmentation arguments
+    parser.add_argument('--use_random_choice_augmentation', action='store_true', default=True, help='Use random choice augmentation')
+    parser.add_argument('--augmentation_type', type=str, default='comprehensive', 
+                       choices=['comprehensive', 'aggressive', 'light'],
+                       help='Type of random choice augmentation')
+    parser.add_argument('--pretrain_augmentation_type', type=str, default='comprehensive',
+                       choices=['comprehensive', 'aggressive', 'light'],
+                       help='Type of random choice augmentation for pretraining')
+    
     args = parser.parse_args()
 
     dataset_configs = {
@@ -68,6 +77,10 @@ def main():
             # Scheduler config
             'scheduler_type': 'cosine', 'optimizer_type': 'novograd',
             'scheduler_params': {'alpha': 0.0},
+            # Augmentation config
+            'use_random_choice_augmentation': True,
+            'augmentation_type': 'comprehensive',
+            'pretrain_augmentation_type': 'comprehensive',
         },
         'cifar100': {
             'input_channels': 3, 'input_dim': (32, 32), 'label_smooth': 0.1,
@@ -81,6 +94,10 @@ def main():
             # Scheduler config
             'scheduler_type': 'cosine', 'optimizer_type': 'novograd',
             'scheduler_params': {'alpha': 0.0},
+            # Augmentation config
+            'use_random_choice_augmentation': True,
+            'augmentation_type': 'comprehensive',
+            'pretrain_augmentation_type': 'comprehensive',
         },
         'mnist': {
             'input_channels': 1, 'input_dim': (28, 28), 'label_smooth': 0.1,
@@ -94,6 +111,10 @@ def main():
             # Scheduler config
             'scheduler_type': 'cosine', 'optimizer_type': 'novograd',
             'scheduler_params': {'alpha': 0.0},
+            # Augmentation config
+            'use_random_choice_augmentation': True,
+            'augmentation_type': 'light',
+            'pretrain_augmentation_type': 'light',
         },
         'fashion_mnist': {
             'input_channels': 1, 'input_dim': (28, 28), 'label_smooth': 0.1,
@@ -104,6 +125,10 @@ def main():
             # SIMO2 specific config
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 10, 'dataset': 'fashion_mnist', 'apply_normalization': True,
+            # Augmentation config
+            'use_random_choice_augmentation': True,
+            'augmentation_type': 'light',
+            'pretrain_augmentation_type': 'light',
         },
         'imagenet2012': {
             'input_channels': 3, 'input_dim': (224, 224), 'label_smooth': 0.1,
@@ -114,6 +139,10 @@ def main():
             # SIMO2 specific config
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 1000, 'dataset': 'imagenet2012', 'apply_normalization': True,
+            # Augmentation config
+            'use_random_choice_augmentation': True,
+            'augmentation_type': 'aggressive',
+            'pretrain_augmentation_type': 'aggressive',
         },
         'caltech101': {
             'input_channels': 3, 'input_dim': (224, 224), 'label_smooth': 0.1,
@@ -124,6 +153,10 @@ def main():
             # SIMO2 specific config
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 101, 'dataset': 'caltech101', 'apply_normalization': True,
+            # Augmentation config
+            'use_random_choice_augmentation': True,
+            'augmentation_type': 'comprehensive',
+            'pretrain_augmentation_type': 'comprehensive',
         },
         'oxford_flowers102': {
             'input_channels': 3, 'input_dim': (224, 224), 'label_smooth': 0.1,
@@ -134,6 +167,10 @@ def main():
             # SIMO2 specific config
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 102, 'dataset': 'oxford_flowers102', 'apply_normalization': True,
+            # Augmentation config
+            'use_random_choice_augmentation': True,
+            'augmentation_type': 'comprehensive',
+            'pretrain_augmentation_type': 'comprehensive',
         },
         'stanford_dogs': {
             'input_channels': 3, 'input_dim': (224, 224), 'label_smooth': 0.1,
@@ -144,6 +181,10 @@ def main():
             # SIMO2 specific config
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 120, 'dataset': 'stanford_dogs', 'apply_normalization': True,
+            # Augmentation config
+            'use_random_choice_augmentation': True,
+            'augmentation_type': 'comprehensive',
+            'pretrain_augmentation_type': 'comprehensive',
         },
         'cats_vs_dogs': {
             'input_channels': 3, 'input_dim': (224, 224), 'label_smooth': 0.1,
@@ -154,6 +195,10 @@ def main():
             # SIMO2 specific config
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 2, 'dataset': 'cats_vs_dogs', 'apply_normalization': True,
+            # Augmentation config
+            'use_random_choice_augmentation': True,
+            'augmentation_type': 'comprehensive',
+            'pretrain_augmentation_type': 'comprehensive',
         },
         'stl10': {
             'input_channels': 3, 'input_dim': (96, 96), 'label_smooth': 0.1,
@@ -164,6 +209,10 @@ def main():
             # SIMO2 specific config
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 10, 'dataset': 'stl10', 'apply_normalization': True,
+            # Augmentation config
+            'use_random_choice_augmentation': True,
+            'augmentation_type': 'comprehensive',
+            'pretrain_augmentation_type': 'comprehensive',
         },
         'custom_folder': {
             'input_channels': 3, 'input_dim': (32, 32),
@@ -173,6 +222,10 @@ def main():
             # SIMO2 specific config (will be updated based on actual data)
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'apply_normalization': True,
+            # Augmentation config
+            'use_random_choice_augmentation': True,
+            'augmentation_type': 'comprehensive',
+            'pretrain_augmentation_type': 'comprehensive',
         }
     }
 
@@ -250,6 +303,14 @@ def main():
     
     if scheduler_params:
         config['scheduler_params'] = scheduler_params
+    
+    # Augmentation argument updates
+    if args.use_random_choice_augmentation is not None:
+        config['use_random_choice_augmentation'] = args.use_random_choice_augmentation
+    if args.augmentation_type is not None:
+        config['augmentation_type'] = args.augmentation_type
+    if args.pretrain_augmentation_type is not None:
+        config['pretrain_augmentation_type'] = args.pretrain_augmentation_type
 
     learning_rate = args.learning_rate
     use_pretraining = args.use_pretraining

@@ -10,7 +10,11 @@ from tqdm import tqdm
 import os
 import orbax.checkpoint as orbax
 from models import YatCNN, ConvAutoencoder
-from data import create_image_folder_dataset, get_image_processor, get_tfds_processor, augment_for_pretraining, augment_for_finetuning
+from data import (
+    create_image_folder_dataset, get_image_processor, get_tfds_processor, 
+    augment_for_pretraining, augment_for_finetuning,
+    augment_with_random_choice, augment_with_random_choice_batch
+)
 import tensorflow_datasets as tfds
 import tensorflow as tf
 from logger import log_metrics
@@ -835,12 +839,18 @@ def _pretrain_autoencoder_loop(
     current_batch_size = dataset_config.get('pretrain_batch_size', fallback_configs['pretrain_batch_size'])
     current_num_epochs = dataset_config.get('pretrain_epochs', fallback_configs['pretrain_epochs'])
     
+    # Get augmentation configuration for pretraining
+    pretrain_augmentation_type = dataset_config.get('pretrain_augmentation_type', 'comprehensive')
+    use_random_choice_augmentation = dataset_config.get('use_random_choice_augmentation', True)
+    
     # Debug: Print what config values are being used
     print(f"🔧 Pretraining config values:")
     print(f"   image_size: {image_size}")
     print(f"   input_channels: {input_channels}")
     print(f"   current_batch_size: {current_batch_size}")
     print(f"   current_num_epochs: {current_num_epochs}")
+    print(f"   pretrain_augmentation_type: {pretrain_augmentation_type}")
+    print(f"   use_random_choice_augmentation: {use_random_choice_augmentation}")
     print(f"   Full dataset_config: {dataset_config}")
     if is_path:
         train_ds, _, class_names, train_size = create_image_folder_dataset(dataset_name, validation_split=0.01, seed=42)
@@ -859,9 +869,16 @@ def _pretrain_autoencoder_loop(
         processor = get_tfds_processor(image_size, dataset_config['image_key'], dataset_config['label_key'])
         base_train_ds = base_train_ds.map(processor)
     def apply_augmentations(x):
+        if use_random_choice_augmentation:
+            print(f"🎨 Using Random Choice Augmentation for Pretraining (type: {pretrain_augmentation_type})")
+            augmented_image = augment_with_random_choice(x, pretrain_augmentation_type)['image']
+        else:
+            print("🎨 Using Standard Augmentation for Pretraining")
+            augmented_image = augment_for_pretraining(x['image'])
+        
         return {
             'original_image': x['image'],
-            'augmented_image': augment_for_pretraining(x['image']),
+            'augmented_image': augmented_image,
             'label': x['label'] # Keep label for t-SNE
         }
     augmented_train_ds = base_train_ds.map(apply_augmentations, num_parallel_calls=tf.data.AUTOTUNE)
@@ -951,6 +968,10 @@ def _train_model_loop(
     current_batch_size = dataset_config.get('batch_size', fallback_configs['batch_size'])
     label_smooth = dataset_config.get('label_smooth', fallback_configs['label_smooth'])
     
+    # Get augmentation configuration
+    augmentation_type = dataset_config.get('augmentation_type', 'comprehensive')
+    use_random_choice_augmentation = dataset_config.get('use_random_choice_augmentation', True)
+    
     # Debug: Print what config values are being used
     print(f"🔧 Training config values:")
     print(f"   image_size: {image_size}")
@@ -960,6 +981,8 @@ def _train_model_loop(
     print(f"   current_batch_size: {current_batch_size}")
     print(f"   label_smooth: {label_smooth}")
     print(f"   orthogonality_weight: {orthogonality_weight}")
+    print(f"   augmentation_type: {augmentation_type}")
+    print(f"   use_random_choice_augmentation: {use_random_choice_augmentation}")
     if orthogonality_weight > 0:
         print(f"   ✅ Orthogonality regularization enabled with weight: {orthogonality_weight}")
     print(f"   Full dataset_config: {dataset_config}")
@@ -970,7 +993,17 @@ def _train_model_loop(
         processor = get_image_processor(image_size=image_size, num_channels=input_channels)
         train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
-        train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
+        
+        # Apply augmentation based on configuration
+        if use_random_choice_augmentation:
+            print(f"🎨 Using Random Choice Augmentation (type: {augmentation_type})")
+            train_ds = train_ds.map(
+                lambda x: augment_with_random_choice(x, augmentation_type), 
+                num_parallel_calls=tf.data.AUTOTUNE
+            )
+        else:
+            print("🎨 Using Standard Augmentation")
+            train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
     else: # TFDS logic
         (train_ds, test_ds), ds_info = tfds.load(
             dataset_name,
@@ -985,7 +1018,17 @@ def _train_model_loop(
         processor = get_tfds_processor(image_size, dataset_config['image_key'], dataset_config['label_key'])
         train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
-        train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
+        
+        # Apply augmentation based on configuration
+        if use_random_choice_augmentation:
+            print(f"🎨 Using Random Choice Augmentation (type: {augmentation_type})")
+            train_ds = train_ds.map(
+                lambda x: augment_with_random_choice(x, augmentation_type), 
+                num_parallel_calls=tf.data.AUTOTUNE
+            )
+        else:
+            print("🎨 Using Standard Augmentation")
+            train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
     model = model_class(num_classes=num_classes, input_channels=input_channels, rngs=nnx.Rngs(rng_seed))
     if pretrained_encoder_path:
         print(f"💾 Loading pretrained encoder weights from {pretrained_encoder_path}...")

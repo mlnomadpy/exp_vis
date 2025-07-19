@@ -175,6 +175,159 @@ def get_random_choice_pipeline(auglayers):
     """
     return keras_cv.layers.RandomChoice(layers=auglayers)
 
+# --- Comprehensive Random Choice Augmentation ---
+def get_comprehensive_random_choice_augmentations():
+    """
+    Returns a comprehensive list of augmentation layers for random choice.
+    This includes various types of augmentations that can be randomly selected.
+    """
+    return [
+        # Geometric transformations
+        tf.keras.layers.RandomRotation(factor=(-0.2, 0.2), fill_mode='reflect'),
+        tf.keras.layers.RandomTranslation(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='reflect'),
+        tf.keras.layers.RandomZoom(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='reflect'),
+        
+        # Color and brightness augmentations
+        keras_cv.layers.RandomBrightness(factor=(-0.3, 0.3)),
+        keras_cv.layers.RandomContrast(factor=(0.7, 1.3)),
+        keras_cv.layers.RandomSaturation(factor=(0.7, 1.3)),
+        keras_cv.layers.RandomHue(factor=(-0.1, 0.1)),
+        
+        # Blur and noise
+        keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 1.0)),
+        keras_cv.layers.RandomGaussianNoise(stddev=(0.0, 0.1)),
+        
+        # Cutout and masking
+        keras_cv.layers.RandomCutout(height_factor=0.2, width_factor=0.2),
+        keras_cv.layers.RandomCutout(height_factor=0.3, width_factor=0.1),
+        keras_cv.layers.RandomCutout(height_factor=0.1, width_factor=0.3),
+        
+        # Identity (no change) - allows some images to remain unchanged
+        tf.keras.layers.Lambda(lambda x: x),
+    ]
+
+def get_aggressive_random_choice_augmentations():
+    """
+    Returns a more aggressive list of augmentation layers for random choice.
+    Use this for datasets that need stronger augmentation.
+    """
+    return [
+        # Stronger geometric transformations
+        tf.keras.layers.RandomRotation(factor=(-0.3, 0.3), fill_mode='reflect'),
+        tf.keras.layers.RandomTranslation(height_factor=(-0.2, 0.2), width_factor=(-0.2, 0.2), fill_mode='reflect'),
+        tf.keras.layers.RandomZoom(height_factor=(-0.2, 0.2), width_factor=(-0.2, 0.2), fill_mode='reflect'),
+        
+        # Stronger color augmentations
+        keras_cv.layers.RandomBrightness(factor=(-0.5, 0.5)),
+        keras_cv.layers.RandomContrast(factor=(0.5, 1.5)),
+        keras_cv.layers.RandomSaturation(factor=(0.5, 1.5)),
+        keras_cv.layers.RandomHue(factor=(-0.2, 0.2)),
+        
+        # More aggressive blur and noise
+        keras_cv.layers.RandomGaussianBlur(kernel_size=5, factor=(0.0, 1.5)),
+        keras_cv.layers.RandomGaussianNoise(stddev=(0.0, 0.2)),
+        
+        # Larger cutouts
+        keras_cv.layers.RandomCutout(height_factor=0.4, width_factor=0.4),
+        keras_cv.layers.RandomCutout(height_factor=0.5, width_factor=0.2),
+        keras_cv.layers.RandomCutout(height_factor=0.2, width_factor=0.5),
+        
+        # Identity (no change)
+        tf.keras.layers.Lambda(lambda x: x),
+    ]
+
+def get_light_random_choice_augmentations():
+    """
+    Returns a lighter list of augmentation layers for random choice.
+    Use this for datasets that need subtle augmentation.
+    """
+    return [
+        # Subtle geometric transformations
+        tf.keras.layers.RandomRotation(factor=(-0.1, 0.1), fill_mode='reflect'),
+        tf.keras.layers.RandomTranslation(height_factor=(-0.05, 0.05), width_factor=(-0.05, 0.05), fill_mode='reflect'),
+        tf.keras.layers.RandomZoom(height_factor=(-0.05, 0.05), width_factor=(-0.05, 0.05), fill_mode='reflect'),
+        
+        # Subtle color augmentations
+        keras_cv.layers.RandomBrightness(factor=(-0.1, 0.1)),
+        keras_cv.layers.RandomContrast(factor=(0.9, 1.1)),
+        keras_cv.layers.RandomSaturation(factor=(0.9, 1.1)),
+        keras_cv.layers.RandomHue(factor=(-0.05, 0.05)),
+        
+        # Light blur
+        keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 0.5)),
+        
+        # Small cutouts
+        keras_cv.layers.RandomCutout(height_factor=0.1, width_factor=0.1),
+        
+        # Identity (no change)
+        tf.keras.layers.Lambda(lambda x: x),
+    ]
+
+def augment_with_random_choice(sample: dict, augmentation_type: str = 'comprehensive') -> dict:
+    """
+    Apply random choice augmentation to a sample.
+    
+    Args:
+        sample: Dictionary containing 'image' and 'label'
+        augmentation_type: Type of augmentation ('comprehensive', 'aggressive', 'light')
+    
+    Returns:
+        Dictionary with augmented image and original label
+    """
+    image = sample['image']
+    
+    # Select augmentation layers based on type
+    if augmentation_type == 'aggressive':
+        aug_layers = get_aggressive_random_choice_augmentations()
+    elif augmentation_type == 'light':
+        aug_layers = get_light_random_choice_augmentations()
+    else:  # comprehensive (default)
+        aug_layers = get_comprehensive_random_choice_augmentations()
+    
+    # Create random choice pipeline
+    random_choice_pipeline = get_random_choice_pipeline(aug_layers)
+    
+    # Apply random choice augmentation
+    augmented_image = random_choice_pipeline(image, training=True)
+    
+    # Ensure values are clipped to valid range
+    augmented_image = tf.clip_by_value(augmented_image, 0.0, 1.0)
+    
+    return {**sample, 'image': augmented_image}
+
+def augment_with_random_choice_batch(batch: dict, augmentation_type: str = 'comprehensive') -> dict:
+    """
+    Apply random choice augmentation to a batch of samples.
+    
+    Args:
+        batch: Dictionary containing 'image' and 'label' tensors
+        augmentation_type: Type of augmentation ('comprehensive', 'aggressive', 'light')
+    
+    Returns:
+        Dictionary with augmented images and original labels
+    """
+    images = batch['image']
+    labels = batch['label']
+    
+    # Select augmentation layers based on type
+    if augmentation_type == 'aggressive':
+        aug_layers = get_aggressive_random_choice_augmentations()
+    elif augmentation_type == 'light':
+        aug_layers = get_light_random_choice_augmentations()
+    else:  # comprehensive (default)
+        aug_layers = get_comprehensive_random_choice_augmentations()
+    
+    # Create random choice pipeline
+    random_choice_pipeline = get_random_choice_pipeline(aug_layers)
+    
+    # Apply random choice augmentation to batch
+    augmented_images = random_choice_pipeline(images, training=True)
+    
+    # Ensure values are clipped to valid range
+    augmented_images = tf.clip_by_value(augmented_images, 0.0, 1.0)
+    
+    return {'image': augmented_images, 'label': labels}
+
 # --- Example usage in your notebook or script ---
 # ds_train_MixUp = ds_train.map(mixup_batch_fn(num_classes=102), num_parallel_calls=tf.data.AUTOTUNE)
 # ds_train_CutMix = ds_train.map(cutmix_batch_fn(num_classes=102), num_parallel_calls=tf.data.AUTOTUNE)
