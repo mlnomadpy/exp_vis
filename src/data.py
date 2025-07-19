@@ -4,7 +4,14 @@
 import os
 import glob
 import tensorflow as tf
-import keras_cv
+
+# Check for keras_cv availability
+try:
+    import keras_cv
+    KERAS_CV_AVAILABLE = True
+except ImportError:
+    print("⚠️  keras_cv not available. Some augmentations will be disabled.")
+    KERAS_CV_AVAILABLE = False
 
 # --- For Local Image Folders ---
 def create_image_folder_dataset(path: str, validation_split: float, seed: int):
@@ -66,9 +73,11 @@ def augment_for_pretraining(image: tf.Tensor) -> tf.Tensor:
 ROTATION_LAYER = tf.keras.layers.RandomRotation(
     factor=(-0.1, 0.1), fill_mode='reflect'
 )
+
 GAUSSIAN_BLUR_LAYER = keras_cv.layers.RandomGaussianBlur(
     kernel_size=3, factor=(0.0, 1.0)
 ) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x)
+
 CUTOUT_LAYER = keras_cv.layers.RandomCutout(
     height_factor=0.2, width_factor=0.2
 ) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x)
@@ -93,13 +102,6 @@ def augment_for_finetuning(sample: dict) -> dict:
 # ==============================================================================
 # Advanced KerasCV Augmentations (MixUp, CutMix, RandAugment, Pipelines)
 # ==============================================================================
-try:
-    import keras_cv
-    KERAS_CV_AVAILABLE = True
-except ImportError:
-    print("⚠️  keras_cv not available. Some augmentations will be disabled.")
-    KERAS_CV_AVAILABLE = False
-import tensorflow as tf
 
 # --- MixUp ---
 def mixup_batch_fn(num_classes, alpha=0.2):
