@@ -14,7 +14,7 @@ Array = jax.Array
 
 class YatConvBlock(nnx.Module):
     def __init__(self, in_channels: int, out_channels: int, *, dropout_rate: float, pool: bool, rngs: nnx.Rngs):
-        self.yat_conv = nnx.Conv(in_channels, out_channels, kernel_size=(3, 3), use_bias=False, padding='SAME', rngs=rngs)
+        self.yat_conv = YatConv(in_channels, out_channels, kernel_size=(3, 3), use_bias=False, padding='SAME', rngs=rngs)
         self.lin_conv = nnx.Conv(out_channels, out_channels, kernel_size=(3, 3), use_bias=False, padding='SAME', rngs=rngs)
         self.dropout = nnx.Dropout(rate=dropout_rate, rngs=rngs)
         self.needs_projection = in_channels != out_channels
@@ -49,10 +49,11 @@ class YatResBlock(nnx.Module):
         residual = x
         y = self.yat_conv(x)
         y = self.lin_conv(y)
+        y = self.dropout(y, deterministic=not training)
+
         if self.needs_projection:
             residual = self.residual_proj(residual)
         y = y + residual
-        y = self.dropout(y, deterministic=not training)
         return y
 # Resnet-18
 class YatCNN(nnx.Module): 
