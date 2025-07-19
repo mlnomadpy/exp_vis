@@ -55,7 +55,7 @@ class YatResBlock(nnx.Module):
             residual = self.residual_proj(residual)
         y = y + residual
         return y
-# Resnet-18
+# Resnet-18/2
 class YatCNN(nnx.Module): 
     def __init__(self, *, num_classes: int, input_channels: int, rngs: nnx.Rngs):
         # Initial convolution
@@ -64,19 +64,19 @@ class YatCNN(nnx.Module):
         # ResNet-18 structure: 4 groups of 2 blocks each
         # Group 1: 64 channels, no stride reduction
         self.layer1_block1 = YatResBlock(64, 64, rngs=rngs)
-        self.layer1_block2 = YatResBlock(64, 64, rngs=rngs)
+        # self.layer1_block2 = YatResBlock(64, 64, rngs=rngs)
         
         # Group 2: 128 channels, stride=2 for first block
         self.layer2_block1 = YatResBlock(64, 128, stride=2, rngs=rngs)
-        self.layer2_block2 = YatResBlock(128, 128, rngs=rngs)
+        # self.layer2_block2 = YatResBlock(128, 128, rngs=rngs)
         
         # Group 3: 256 channels, stride=2 for first block
         self.layer3_block1 = YatResBlock(128, 256, stride=2, rngs=rngs)
-        self.layer3_block2 = YatResBlock(256, 256, rngs=rngs)
+        # self.layer3_block2 = YatResBlock(256, 256, rngs=rngs)
         
         # Group 4: 512 channels, stride=2 for first block
         self.layer4_block1 = YatResBlock(256, 512, stride=2, rngs=rngs)
-        self.layer4_block2 = YatResBlock(512, 512, rngs=rngs)
+        # self.layer4_block2 = YatResBlock(512, 512, rngs=rngs)
         
         # Global average pooling and final classification layer
         self.avg_pool = partial(nnx.avg_pool, window_shape=(1, 1), strides=(1, 1))
@@ -89,22 +89,22 @@ class YatCNN(nnx.Module):
         
         # Layer 1
         x = self.layer1_block1(x, training=training)
-        x = self.layer1_block2(x, training=training)
+        # x = self.layer1_block2(x, training=training)
         if return_activations_for_layer == 'layer1': return x
         
         # Layer 2
         x = self.layer2_block1(x, training=training)
-        x = self.layer2_block2(x, training=training)
+        # x = self.layer2_block2(x, training=training)
         if return_activations_for_layer == 'layer2': return x
         
         # Layer 3
         x = self.layer3_block1(x, training=training)
-        x = self.layer3_block2(x, training=training)
+        # x = self.layer3_block2(x, training=training)
         if return_activations_for_layer == 'layer3': return x
         
         # Layer 4
         x = self.layer4_block1(x, training=training)
-        x = self.layer4_block2(x, training=training)
+        # x = self.layer4_block2(x, training=training)
         if return_activations_for_layer == 'layer4': return x
         
         # Global average pooling
