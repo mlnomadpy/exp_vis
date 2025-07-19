@@ -10,7 +10,7 @@ from runner import run_training_and_analysis
 def main():
     parser = argparse.ArgumentParser(description="Run training and analysis pipeline.")
     parser.add_argument('--dataset', type=str, default='cifar10', help='Dataset name or path')
-    parser.add_argument('--learning_rate', type=float, default=0.01, help='Learning rate')
+    parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--use_pretraining', action='store_true', help='Use autoencoder pretraining')
     parser.add_argument('--use_simo2_pretraining', action='store_true', help='Use SIMO2 pretraining')
     parser.add_argument('--freeze_encoder', action='store_true', help='Freeze encoder during fine-tuning')
@@ -54,7 +54,7 @@ def main():
     parser.add_argument('--orthogonality_weight', type=float, default=0.0, help='Weight for orthogonality regularization of output layer')
     
     # Augmentation arguments
-    parser.add_argument('--use_keras_cv_augmentation', action='store_true', default=True, help='Use KerasCV augmentation (includes CutMix and MixUp)')
+    parser.add_argument('--use_keras_cv_augmentation', action='store_true', default=False, help='Use KerasCV augmentation (includes CutMix and MixUp)')
     parser.add_argument('--augmentation_type', type=str, default='comprehensive', 
                        choices=['comprehensive', 'aggressive', 'light'],
                        help='Type of random choice augmentation')

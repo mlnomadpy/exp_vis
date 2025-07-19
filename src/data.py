@@ -520,40 +520,27 @@ def get_image_only_augmenter(augmentation_type: str = 'comprehensive'):
         import keras_cv
         layers = []
         
-        # Basic augmentations (always included) - only for images
-        layers.extend([
-            keras_cv.layers.RandomFlip(),
-            keras_cv.layers.RandomRotation(factor=(-0.1, 0.1), fill_mode='reflect'),
-            keras_cv.layers.RandomTranslation(height_factor=(-0.05, 0.05), width_factor=(-0.05, 0.05), fill_mode='reflect'),
-            keras_cv.layers.RandomZoom(height_factor=(-0.05, 0.05), width_factor=(-0.05, 0.05), fill_mode='reflect'),
-            keras_cv.layers.RandomBrightness(factor=(-0.2, 0.2)),
-            keras_cv.layers.RandomContrast(factor=(-0.2, 0.2), value_range=(0, 1)),
-        ])
-        
-        # Add more aggressive augmentations based on type
-        if augmentation_type == 'aggressive':
+        # MUCH LIGHTER augmentations - only essential ones
+        if augmentation_type == 'light':
+            # Minimal augmentation - just horizontal flip
             layers.extend([
-                keras_cv.layers.RandomRotation(factor=(-0.3, 0.3), fill_mode='reflect'),
-                keras_cv.layers.RandomTranslation(height_factor=(-0.2, 0.2), width_factor=(-0.2, 0.2), fill_mode='reflect'),
-                keras_cv.layers.RandomZoom(height_factor=(-0.2, 0.2), width_factor=(-0.2, 0.2), fill_mode='reflect'),
-                keras_cv.layers.RandomBrightness(factor=(-0.4, 0.4)),
-                keras_cv.layers.RandomContrast(factor=(-0.4, 0.4), value_range=(0, 1)),
-                keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 1.0)),
+                keras_cv.layers.RandomFlip(),
             ])
-        
         elif augmentation_type == 'comprehensive':
+            # Light but reasonable augmentation
             layers.extend([
-                keras_cv.layers.RandomRotation(factor=(-0.2, 0.2), fill_mode='reflect'),
-                keras_cv.layers.RandomTranslation(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='reflect'),
-                keras_cv.layers.RandomZoom(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='reflect'),
-                keras_cv.layers.RandomBrightness(factor=(-0.3, 0.3)),
-                keras_cv.layers.RandomContrast(factor=(-0.3, 0.3), value_range=(0, 1)),
-                keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 0.8)),
+                keras_cv.layers.RandomFlip(),
+                keras_cv.layers.RandomRotation(factor=(-0.05, 0.05), fill_mode='reflect'),  # Very small rotation
+                keras_cv.layers.RandomBrightness(factor=(-0.1, 0.1)),  # Small brightness change
             ])
-        
-        # Light augmentations (already included in basic)
-        elif augmentation_type == 'light':
-            pass  # Use basic augmentations only
+        elif augmentation_type == 'aggressive':
+            # Moderate augmentation
+            layers.extend([
+                keras_cv.layers.RandomFlip(),
+                keras_cv.layers.RandomRotation(factor=(-0.1, 0.1), fill_mode='reflect'),
+                keras_cv.layers.RandomBrightness(factor=(-0.2, 0.2)),
+                keras_cv.layers.RandomContrast(factor=(-0.1, 0.1), value_range=(0, 1)),
+            ])
         
         return keras_cv.layers.Augmenter(layers=layers)
     
