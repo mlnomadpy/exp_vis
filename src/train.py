@@ -13,7 +13,6 @@ from models import YatCNN, ConvAutoencoder
 from data import (
     create_image_folder_dataset, get_image_processor, get_tfds_processor, 
     augment_for_pretraining, augment_for_finetuning,
-    augment_with_random_choice, augment_with_random_choice_batch
 )
 import tensorflow_datasets as tfds
 import tensorflow as tf
@@ -881,12 +880,8 @@ def _pretrain_autoencoder_loop(
         processor = get_tfds_processor(image_size, dataset_config['image_key'], dataset_config['label_key'])
         base_train_ds = base_train_ds.map(processor)
     def apply_augmentations(x):
-        if use_random_choice_augmentation:
-            print(f"🎨 Using Random Choice Augmentation for Pretraining (type: {pretrain_augmentation_type})")
-            augmented_image = augment_with_random_choice(x, pretrain_augmentation_type)['image']
-        else:
-            print("🎨 Using Standard Augmentation for Pretraining")
-            augmented_image = augment_for_pretraining(x['image'])
+        print("🎨 Using Standard Augmentation for Pretraining")
+        augmented_image = augment_for_pretraining(x['image'])
         
         return {
             'original_image': x['image'],
