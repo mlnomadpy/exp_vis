@@ -21,6 +21,7 @@ def run_training_and_analysis(
     run_kernel_analysis: bool = True,
     run_adversarial_analysis: bool = True,
     adversarial_epsilon: float = 0.01,
+    orthogonality_weight: float = 0.0,
 ):
     print("\n" + "="*80 + f"\nRUNNING TRAINING & ANALYSIS FOR: {dataset_name.upper()}\n" + "="*80)
     is_path = os.path.isdir(dataset_name)
@@ -52,7 +53,8 @@ def run_training_and_analysis(
         YatCNN, "YatCNN", dataset_name, 0, learning_rate, __import__('optax').novograd,
         dataset_config=dataset_config, fallback_configs=fallback_configs,
         pretrained_encoder_path=pretrained_encoder_path,
-        freeze_encoder=freeze_encoder
+        freeze_encoder=freeze_encoder,
+        orthogonality_weight=orthogonality_weight
     )
     print("\n📊 STEP 3: Running Final Performance Analysis...")
     plot_training_curves(metrics_history, "YatCNN")

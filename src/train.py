@@ -524,7 +524,7 @@ def _pretrain_simo2_loop(
     
     return save_dir
 
-def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0):
+def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0, orthogonality_weight: float = 0.0):
     logits = model(batch['image'], training=True)
     one_hot_labels = jax.nn.one_hot(batch['label'], num_classes=num_classes)
     if label_smoothing > 0:
@@ -534,20 +534,40 @@ def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0):
     loss = optax.softmax_cross_entropy(
         logits=logits, labels=smoothed_labels
     ).mean()
-    return loss, logits
+    
+    orthogonality_loss = 0.0
+    # Add orthogonality regularization if weight > 0
+    if orthogonality_weight > 0:
+        # Get the weight matrix W from the output layer
+        W = model.out_linear.kernel.value  # Shape: (1024, num_classes)
+        
+        # Compute W.W^T
+        WWT = jnp.dot(W.T, W)  # Shape: (num_classes, num_classes)
+        
+        # Create mask to exclude diagonal elements
+        mask = jnp.ones_like(WWT) - jnp.eye(WWT.shape[0])
+        
+        # Compute orthogonality loss: sum of squared off-diagonal elements
+        orthogonality_loss = jnp.sum((WWT * mask) ** 2)
+        
+        # Add to total loss
+        loss = loss + orthogonality_weight * orthogonality_loss
+    
+    return loss, logits, orthogonality_loss
 
-@nnx.jit(static_argnames=['num_classes', 'label_smoothing'])
-def train_step(model, optimizer: nnx.Optimizer, metrics: nnx.MultiMetric, batch, num_classes: int, label_smoothing: float):
+@nnx.jit(static_argnames=['num_classes', 'label_smoothing', 'orthogonality_weight'])
+def train_step(model, optimizer: nnx.Optimizer, metrics: nnx.MultiMetric, batch, num_classes: int, label_smoothing: float, orthogonality_weight: float = 0.0):
     def loss_fn_wrapped(m, b):
-        return loss_fn(m, b, num_classes=num_classes, label_smoothing=label_smoothing)
+        return loss_fn(m, b, num_classes=num_classes, label_smoothing=label_smoothing, orthogonality_weight=orthogonality_weight)
     grad_fn = nnx.value_and_grad(loss_fn_wrapped, has_aux=True)
-    (loss, logits), grads = grad_fn(model, batch)
+    (loss, logits, orthogonality_loss), grads = grad_fn(model, batch)
     metrics.update(loss=loss, logits=logits, labels=batch['label'])
     optimizer.update(grads)
+    return orthogonality_loss
 
 @nnx.jit(static_argnames=['num_classes'])
 def eval_step(model, metrics: nnx.MultiMetric, batch, num_classes: int):
-    loss, logits = loss_fn(model, batch, num_classes=num_classes, label_smoothing=0.0)
+    loss, logits, _ = loss_fn(model, batch, num_classes=num_classes, label_smoothing=0.0, orthogonality_weight=0.0)
     metrics.update(loss=loss, logits=logits, labels=batch['label'])
 
 def autoencoder_loss_fn(model: ConvAutoencoder, batch):
@@ -845,6 +865,7 @@ def _train_model_loop(
     fallback_configs: dict,
     pretrained_encoder_path: tp.Optional[str] = None,
     freeze_encoder: bool = False,
+    orthogonality_weight: float = 0.0,
 ):
     stage = "Fine-tuning with Pretrained Weights" if pretrained_encoder_path else "Training from Scratch"
     if freeze_encoder and pretrained_encoder_path:
@@ -866,6 +887,9 @@ def _train_model_loop(
     print(f"   current_eval_every: {current_eval_every}")
     print(f"   current_batch_size: {current_batch_size}")
     print(f"   label_smooth: {label_smooth}")
+    print(f"   orthogonality_weight: {orthogonality_weight}")
+    if orthogonality_weight > 0:
+        print(f"   ✅ Orthogonality regularization enabled with weight: {orthogonality_weight}")
     print(f"   Full dataset_config: {dataset_config}")
     if is_path:
         split_percentage = dataset_config.get('test_split_percentage', 0.2)
@@ -948,7 +972,7 @@ def _train_model_loop(
         epoch_train_iter = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
         pbar = tqdm(epoch_train_iter, total=steps_per_epoch, desc=f"Epoch {epoch + 1}/{current_num_epochs} ({stage})")
         for batch_data in pbar:
-            train_step(model, optimizer, metrics_computer, batch_data, num_classes=num_classes, label_smoothing=label_smooth)
+            orthogonality_loss = train_step(model, optimizer, metrics_computer, batch_data, num_classes=num_classes, label_smoothing=label_smooth, orthogonality_weight=orthogonality_weight)
             if global_step_counter > 0 and (global_step_counter % current_eval_every == 0 or global_step_counter >= total_steps -1):
                 train_metrics = metrics_computer.compute()
                 metrics_history['train_loss'].append(train_metrics['loss'])
@@ -971,6 +995,7 @@ def _train_model_loop(
                     'test_loss': test_metrics['loss'],
                     'test_accuracy': test_metrics['accuracy'],
                     'learning_rate': current_lr,
+                    'orthogonality_loss': float(orthogonality_loss) if orthogonality_weight > 0 else 0.0,
                 }, step=global_step_counter)
             global_step_counter += 1
         if global_step_counter >= total_steps: break

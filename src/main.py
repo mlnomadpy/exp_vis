@@ -51,6 +51,7 @@ def main():
     parser.add_argument('--scheduler_warmup_steps', type=int, default=None, help='Warmup steps for warmup_cosine scheduler')
     parser.add_argument('--scheduler_end_value', type=float, default=None, help='End value for schedulers')
     parser.add_argument('--scheduler_power', type=float, default=1.0, help='Power for polynomial scheduler')
+    parser.add_argument('--orthogonality_weight', type=float, default=0.0, help='Weight for orthogonality regularization of output layer')
     
     args = parser.parse_args()
 
@@ -292,6 +293,7 @@ def main():
             "run_kernel_analysis": run_kernel_analysis,
             "run_adversarial_analysis": run_adversarial_analysis,
             "adversarial_epsilon": adversarial_epsilon,
+            "orthogonality_weight": args.orthogonality_weight,
             "scheduler_type": args.scheduler_type,
             "optimizer_type": args.optimizer_type,
             "scheduler_params": scheduler_params if 'scheduler_params' in locals() else {},
@@ -324,6 +326,7 @@ def main():
         run_kernel_analysis=run_kernel_analysis,
         run_adversarial_analysis=run_adversarial_analysis,
         adversarial_epsilon=adversarial_epsilon,
+        orthogonality_weight=args.orthogonality_weight,
     )
 
 if __name__ == '__main__':

@@ -49,6 +49,9 @@ LABEL_KEY="label"         # e.g. "label"
 TRAIN_SPLIT="train"       # e.g. "train[:80%]"
 TEST_SPLIT="test"         # e.g. "train[80%:]"
 
+# Orthogonality regularization
+ORTHOGONALITY_WEIGHT=0.0   # e.g. 0.1 for moderate regularization, 1.0 for strong regularization
+
 python src/main.py \
   --dataset "$DATASET" \
   --learning_rate $LEARNING_RATE \
@@ -79,4 +82,5 @@ python src/main.py \
   --scheduler_decay_factor $SCHEDULER_DECAY_FACTOR \
   --scheduler_warmup_steps $SCHEDULER_WARMUP_STEPS \
   --scheduler_end_value $SCHEDULER_END_VALUE \
-  --scheduler_power $SCHEDULER_POWER 
+  --scheduler_power $SCHEDULER_POWER \
+  --orthogonality_weight $ORTHOGONALITY_WEIGHT 
