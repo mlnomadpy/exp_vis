@@ -107,6 +107,10 @@ def test_augmentation_layers():
     bright_img = brightness_layer(test_img_tensor, training=True)
     print(f"   Brightness: Shape {bright_img.shape}, Range [{bright_img.numpy().min():.3f}, {bright_img.numpy().max():.3f}]")
     
+    # Test saturation
+    saturation_img = tf.image.random_saturation(test_img_tensor, 0.7, 1.3)
+    print(f"   Saturation: Shape {saturation_img.shape}, Range [{saturation_img.numpy().min():.3f}, {saturation_img.numpy().max():.3f}]")
+    
     # Test cutout
     try:
         import keras_cv
@@ -115,6 +119,10 @@ def test_augmentation_layers():
         print(f"   Cutout: Shape {cutout_img.shape}, Range [{cutout_img.numpy().min():.3f}, {cutout_img.numpy().max():.3f}]")
     except ImportError:
         print("   Cutout: keras_cv not available")
+    
+    # Test hue
+    hue_img = tf.image.random_hue(test_img_tensor, 0.1)
+    print(f"   Hue: Shape {hue_img.shape}, Range [{hue_img.numpy().min():.3f}, {hue_img.numpy().max():.3f}]")
 
 def test_batch_augmentation():
     """Test batch augmentation functionality."""

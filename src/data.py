@@ -68,10 +68,10 @@ ROTATION_LAYER = tf.keras.layers.RandomRotation(
 )
 GAUSSIAN_BLUR_LAYER = keras_cv.layers.RandomGaussianBlur(
     kernel_size=3, factor=(0.0, 1.0)
-)
+) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x)
 CUTOUT_LAYER = keras_cv.layers.RandomCutout(
     height_factor=0.2, width_factor=0.2
-)
+) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x)
 
 @tf.function
 def augment_for_finetuning(sample: dict) -> dict:
@@ -83,9 +83,9 @@ def augment_for_finetuning(sample: dict) -> dict:
     if tf.random.uniform([]) > 0.9:
         image = tf.image.rgb_to_grayscale(image)
         image = tf.image.grayscale_to_rgb(image)
-    if tf.random.uniform([]) > 0.5:
+    if tf.random.uniform([]) > 0.5 and KERAS_CV_AVAILABLE:
         image = GAUSSIAN_BLUR_LAYER(image, training=True)
-    if tf.random.uniform([]) > 0.5:
+    if tf.random.uniform([]) > 0.5 and KERAS_CV_AVAILABLE:
         image = CUTOUT_LAYER(image, training=True)
     augmented_image = tf.clip_by_value(image, 0.0, 1.0)
     return {**sample, 'image': augmented_image}
@@ -93,7 +93,12 @@ def augment_for_finetuning(sample: dict) -> dict:
 # ==============================================================================
 # Advanced KerasCV Augmentations (MixUp, CutMix, RandAugment, Pipelines)
 # ==============================================================================
-import keras_cv
+try:
+    import keras_cv
+    KERAS_CV_AVAILABLE = True
+except ImportError:
+    print("⚠️  keras_cv not available. Some augmentations will be disabled.")
+    KERAS_CV_AVAILABLE = False
 import tensorflow as tf
 
 # --- MixUp ---
@@ -103,6 +108,10 @@ def mixup_batch_fn(num_classes, alpha=0.2):
     Usage:
         ds = ds.map(mixup_batch_fn(num_classes=102, alpha=0.2), num_parallel_calls=tf.data.AUTOTUNE)
     """
+    if not KERAS_CV_AVAILABLE:
+        print("⚠️  MixUp not available (keras_cv not installed). Returning identity function.")
+        return lambda images, labels: (images, labels)
+    
     mixup = keras_cv.layers.MixUp(alpha=alpha)
     def _mixup(images, labels):
         oh_labels = tf.one_hot(labels, num_classes)
@@ -117,6 +126,10 @@ def cutmix_batch_fn(num_classes, alpha=0.5):
     Usage:
         ds = ds.map(cutmix_batch_fn(num_classes=102, alpha=0.5), num_parallel_calls=tf.data.AUTOTUNE)
     """
+    if not KERAS_CV_AVAILABLE:
+        print("⚠️  CutMix not available (keras_cv not installed). Returning identity function.")
+        return lambda images, labels: (images, labels)
+    
     cutmix = keras_cv.layers.CutMix(alpha=alpha)
     def _cutmix(images, labels):
         oh_labels = tf.one_hot(labels, num_classes)
@@ -132,6 +145,10 @@ def get_randaugment_layer(value_range=(0, 255), augmentations_per_image=2, magni
         layer = get_randaugment_layer()
         ds = ds.map(lambda img, lbl: (layer(img), lbl))
     """
+    if not KERAS_CV_AVAILABLE:
+        print("⚠️  RandAugment not available (keras_cv not installed). Returning identity layer.")
+        return tf.keras.layers.Lambda(lambda x: x)
+    
     return keras_cv.layers.RandAugment(
         value_range=value_range,
         augmentations_per_image=augmentations_per_image,
@@ -145,6 +162,10 @@ def get_standard_randaugment_policy(value_range=(0, 255), magnitude=0.3, magnitu
     Usage:
         layers = get_standard_randaugment_policy()
     """
+    if not KERAS_CV_AVAILABLE:
+        print("⚠️  RandAugment policy not available (keras_cv not installed). Returning empty list.")
+        return []
+    
     return keras_cv.layers.RandAugment.get_standard_policy(
         value_range=value_range,
         magnitude=magnitude,
@@ -159,6 +180,10 @@ def get_random_augmentation_pipeline(auglayers, augmentations_per_image=2, rate=
         pipeline = get_random_augmentation_pipeline(auglayers)
         ds = ds.map(lambda img, lbl: (pipeline(img), lbl))
     """
+    if not KERAS_CV_AVAILABLE:
+        print("⚠️  RandomAugmentationPipeline not available (keras_cv not installed). Returning identity layer.")
+        return tf.keras.layers.Lambda(lambda x: x)
+    
     return keras_cv.layers.RandomAugmentationPipeline(
         layers=auglayers,
         augmentations_per_image=augmentations_per_image,
@@ -173,6 +198,10 @@ def get_random_choice_pipeline(auglayers):
         pipeline = get_random_choice_pipeline(auglayers)
         ds = ds.map(lambda img, lbl: (pipeline(img), lbl))
     """
+    if not KERAS_CV_AVAILABLE:
+        print("⚠️  RandomChoice not available (keras_cv not installed). Returning identity layer.")
+        return tf.keras.layers.Lambda(lambda x: x)
+    
     return keras_cv.layers.RandomChoice(layers=auglayers)
 
 # --- Comprehensive Random Choice Augmentation ---
@@ -187,20 +216,20 @@ def get_comprehensive_random_choice_augmentations():
         tf.keras.layers.RandomTranslation(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='reflect'),
         tf.keras.layers.RandomZoom(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='reflect'),
         
-        # Color and brightness augmentations
-        keras_cv.layers.RandomBrightness(factor=(-0.3, 0.3)),
-        keras_cv.layers.RandomContrast(factor=(0.7, 1.3)),
-        keras_cv.layers.RandomSaturation(factor=(0.7, 1.3)),
-        keras_cv.layers.RandomHue(factor=(-0.1, 0.1)),
+        # Color and brightness augmentations (using TensorFlow layers)
+        tf.keras.layers.RandomBrightness(factor=(-0.3, 0.3)),
+        tf.keras.layers.RandomContrast(factor=(0.7, 1.3)),
+        tf.keras.layers.Lambda(lambda x: tf.image.random_saturation(x, 0.7, 1.3)),
+        tf.keras.layers.Lambda(lambda x: tf.image.random_hue(x, 0.1)),
         
         # Blur and noise
-        keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 1.0)),
-        keras_cv.layers.RandomGaussianNoise(stddev=(0.0, 0.1)),
+        keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 1.0)) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
+        keras_cv.layers.RandomGaussianNoise(stddev=(0.0, 0.1)) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
         
         # Cutout and masking
-        keras_cv.layers.RandomCutout(height_factor=0.2, width_factor=0.2),
-        keras_cv.layers.RandomCutout(height_factor=0.3, width_factor=0.1),
-        keras_cv.layers.RandomCutout(height_factor=0.1, width_factor=0.3),
+        keras_cv.layers.RandomCutout(height_factor=0.2, width_factor=0.2) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
+        keras_cv.layers.RandomCutout(height_factor=0.3, width_factor=0.1) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
+        keras_cv.layers.RandomCutout(height_factor=0.1, width_factor=0.3) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
         
         # Identity (no change) - allows some images to remain unchanged
         tf.keras.layers.Lambda(lambda x: x),
@@ -217,20 +246,20 @@ def get_aggressive_random_choice_augmentations():
         tf.keras.layers.RandomTranslation(height_factor=(-0.2, 0.2), width_factor=(-0.2, 0.2), fill_mode='reflect'),
         tf.keras.layers.RandomZoom(height_factor=(-0.2, 0.2), width_factor=(-0.2, 0.2), fill_mode='reflect'),
         
-        # Stronger color augmentations
-        keras_cv.layers.RandomBrightness(factor=(-0.5, 0.5)),
-        keras_cv.layers.RandomContrast(factor=(0.5, 1.5)),
-        keras_cv.layers.RandomSaturation(factor=(0.5, 1.5)),
-        keras_cv.layers.RandomHue(factor=(-0.2, 0.2)),
+        # Stronger color augmentations (using TensorFlow layers)
+        tf.keras.layers.RandomBrightness(factor=(-0.5, 0.5)),
+        tf.keras.layers.RandomContrast(factor=(0.5, 1.5)),
+        tf.keras.layers.Lambda(lambda x: tf.image.random_saturation(x, 0.5, 1.5)),
+        tf.keras.layers.Lambda(lambda x: tf.image.random_hue(x, 0.2)),
         
         # More aggressive blur and noise
-        keras_cv.layers.RandomGaussianBlur(kernel_size=5, factor=(0.0, 1.5)),
-        keras_cv.layers.RandomGaussianNoise(stddev=(0.0, 0.2)),
+        keras_cv.layers.RandomGaussianBlur(kernel_size=5, factor=(0.0, 1.5)) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
+        keras_cv.layers.RandomGaussianNoise(stddev=(0.0, 0.2)) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
         
         # Larger cutouts
-        keras_cv.layers.RandomCutout(height_factor=0.4, width_factor=0.4),
-        keras_cv.layers.RandomCutout(height_factor=0.5, width_factor=0.2),
-        keras_cv.layers.RandomCutout(height_factor=0.2, width_factor=0.5),
+        keras_cv.layers.RandomCutout(height_factor=0.4, width_factor=0.4) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
+        keras_cv.layers.RandomCutout(height_factor=0.5, width_factor=0.2) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
+        keras_cv.layers.RandomCutout(height_factor=0.2, width_factor=0.5) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
         
         # Identity (no change)
         tf.keras.layers.Lambda(lambda x: x),
@@ -247,17 +276,17 @@ def get_light_random_choice_augmentations():
         tf.keras.layers.RandomTranslation(height_factor=(-0.05, 0.05), width_factor=(-0.05, 0.05), fill_mode='reflect'),
         tf.keras.layers.RandomZoom(height_factor=(-0.05, 0.05), width_factor=(-0.05, 0.05), fill_mode='reflect'),
         
-        # Subtle color augmentations
-        keras_cv.layers.RandomBrightness(factor=(-0.1, 0.1)),
-        keras_cv.layers.RandomContrast(factor=(0.9, 1.1)),
-        keras_cv.layers.RandomSaturation(factor=(0.9, 1.1)),
-        keras_cv.layers.RandomHue(factor=(-0.05, 0.05)),
+        # Subtle color augmentations (using TensorFlow layers)
+        tf.keras.layers.RandomBrightness(factor=(-0.1, 0.1)),
+        tf.keras.layers.RandomContrast(factor=(0.9, 1.1)),
+        tf.keras.layers.Lambda(lambda x: tf.image.random_saturation(x, 0.9, 1.1)),
+        tf.keras.layers.Lambda(lambda x: tf.image.random_hue(x, 0.05)),
         
         # Light blur
-        keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 0.5)),
+        keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 0.5)) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
         
         # Small cutouts
-        keras_cv.layers.RandomCutout(height_factor=0.1, width_factor=0.1),
+        keras_cv.layers.RandomCutout(height_factor=0.1, width_factor=0.1) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
         
         # Identity (no change)
         tf.keras.layers.Lambda(lambda x: x),
