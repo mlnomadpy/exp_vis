@@ -1131,13 +1131,8 @@ def _train_model_loop(
         pbar = tqdm(epoch_train_iter, total=steps_per_epoch, desc=f"Epoch {epoch + 1}/{current_num_epochs} ({stage})")
         
         for batch_data in pbar:
-            # Convert batch data to dict format if needed
-            if use_keras_cv_augmentation:
-                # Convert from (images, labels) tuple to dict format
-                batch_dict = {'image': batch_data[0], 'label': batch_data[1]}
-            else:
-                # Already in dict format from processor
-                batch_dict = batch_data
+            # Both augmentation types now return dict format
+            batch_dict = batch_data
             
             train_step(model, optimizer, metrics_computer, batch_dict, num_classes=num_classes, label_smoothing=label_smooth, orthogonality_weight=orthogonality_weight)
             global_step_counter += 1

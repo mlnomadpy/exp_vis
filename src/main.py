@@ -54,7 +54,7 @@ def main():
     parser.add_argument('--orthogonality_weight', type=float, default=0.0, help='Weight for orthogonality regularization of output layer')
     
     # Augmentation arguments
-    parser.add_argument('--use_random_choice_augmentation', action='store_true', default=True, help='Use random choice augmentation')
+    parser.add_argument('--use_keras_cv_augmentation', action='store_true', default=True, help='Use KerasCV augmentation (includes CutMix and MixUp)')
     parser.add_argument('--augmentation_type', type=str, default='comprehensive', 
                        choices=['comprehensive', 'aggressive', 'light'],
                        help='Type of random choice augmentation')

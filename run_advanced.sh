@@ -53,7 +53,7 @@ TEST_SPLIT="test"         # e.g. "train[80%:]"
 ORTHOGONALITY_WEIGHT=0.0   # e.g. 0.1 for moderate regularization, 1.0 for strong regularization
 
 # Augmentation settings
-USE_RANDOM_CHOICE_AUGMENTATION=true  # Set to false to use standard augmentation
+USE_KERAS_CV_AUGMENTATION=true      # Set to false to use standard augmentation
 AUGMENTATION_TYPE="comprehensive"    # Options: light, comprehensive, aggressive
 PRETRAIN_AUGMENTATION_TYPE="comprehensive"  # Options: light, comprehensive, aggressive
 
@@ -89,6 +89,6 @@ python src/main.py \
   --scheduler_end_value $SCHEDULER_END_VALUE \
   --scheduler_power $SCHEDULER_POWER \
   --orthogonality_weight $ORTHOGONALITY_WEIGHT \
-  --use_random_choice_augmentation \
+  --use_keras_cv_augmentation \
   --augmentation_type $AUGMENTATION_TYPE \
   --pretrain_augmentation_type $PRETRAIN_AUGMENTATION_TYPE 

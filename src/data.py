@@ -513,7 +513,7 @@ def create_augmented_dataset(dataset, num_classes: int, mode: str = "train",
     Create an augmented dataset using KerasCV.
     
     Args:
-        dataset: TensorFlow dataset
+        dataset: TensorFlow dataset (can be in dict format {'image': ..., 'label': ...} or tuple format (images, labels))
         num_classes: Number of classes
         mode: Dataset mode ('train' or 'validation')
         augmentation_type: Type of augmentation
@@ -527,18 +527,43 @@ def create_augmented_dataset(dataset, num_classes: int, mode: str = "train",
         dataset = dataset.shuffle(batch_size * 4)
         dataset = dataset.batch(batch_size)
         
-        # Apply augmentation
-        dataset = dataset.map(
-            lambda images, labels: augment_with_keras_cv(images, labels, num_classes, augmentation_type),
-            num_parallel_calls=tf.data.AUTOTUNE
-        )
+        # Apply augmentation - handle both dict and tuple formats
+        def augment_batch(batch_data):
+            if isinstance(batch_data, dict):
+                # Dict format: {'image': ..., 'label': ...}
+                images = batch_data['image']
+                labels = batch_data['label']
+            else:
+                # Tuple format: (images, labels)
+                images, labels = batch_data
+            
+            # Apply KerasCV augmentation
+            aug_images, aug_labels = augment_with_keras_cv(images, labels, num_classes, augmentation_type)
+            
+            # Return in dict format for consistency
+            return {'image': aug_images, 'label': aug_labels}
+        
+        dataset = dataset.map(augment_batch, num_parallel_calls=tf.data.AUTOTUNE)
     else:
         # Batch and process validation
         dataset = dataset.batch(batch_size)
-        dataset = dataset.map(
-            lambda images, labels: process_validation(images, labels, num_classes),
-            num_parallel_calls=tf.data.AUTOTUNE
-        )
+        
+        def process_batch(batch_data):
+            if isinstance(batch_data, dict):
+                # Dict format: {'image': ..., 'label': ...}
+                images = batch_data['image']
+                labels = batch_data['label']
+            else:
+                # Tuple format: (images, labels)
+                images, labels = batch_data
+            
+            # Convert labels to one-hot for validation
+            one_hot_labels = tf.one_hot(labels, num_classes)
+            
+            # Return in dict format for consistency
+            return {'image': images, 'label': one_hot_labels}
+        
+        dataset = dataset.map(process_batch, num_parallel_calls=tf.data.AUTOTUNE)
         dataset = dataset.cache()
     
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
