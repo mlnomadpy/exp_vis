@@ -567,8 +567,8 @@ def train_step(model, optimizer: nnx.Optimizer, metrics: nnx.MultiMetric, batch,
 
 @nnx.jit(static_argnames=['num_classes'])
 def eval_step(model, metrics: nnx.MultiMetric, batch, num_classes: int):
-    loss, (logits, _) = loss_fn(model, batch, num_classes=num_classes, label_smoothing=0.0, orthogonality_weight=0.0)
-    metrics.update(loss=loss, logits=logits, labels=batch['label'])
+    loss, (logits, orthogonality_loss) = loss_fn(model, batch, num_classes=num_classes, label_smoothing=0.0, orthogonality_weight=0.0)
+    metrics.update(loss=loss, logits=logits, labels=batch['label'], orthogonality_loss=orthogonality_loss)
 
 def autoencoder_loss_fn(model: ConvAutoencoder, batch):
     augmented_image = batch['augmented_image']
