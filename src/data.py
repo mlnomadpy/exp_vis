@@ -4,14 +4,7 @@
 import os
 import glob
 import tensorflow as tf
-
-# Check for keras_cv availability
-try:
-    import keras_cv
-    KERAS_CV_AVAILABLE = True
-except ImportError:
-    print("⚠️  keras_cv not available. Some augmentations will be disabled.")
-    KERAS_CV_AVAILABLE = False
+import keras_cv
 
 # --- For Local Image Folders ---
 def create_image_folder_dataset(path: str, validation_split: float, seed: int):
@@ -73,12 +66,12 @@ def augment_for_pretraining(image: tf.Tensor) -> tf.Tensor:
 ROTATION_LAYER = tf.keras.layers.RandomRotation(
     factor=(-0.1, 0.1), fill_mode='reflect'
 )
-
 GAUSSIAN_BLUR_LAYER = keras_cv.layers.RandomGaussianBlur(
     kernel_size=3, factor=(0.0, 1.0)
-) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x)
-
-CUTOUT_LAYER = tf.keras.layers.Lambda(lambda x: tf.image.central_crop(x, 0.9))
+)
+CUTOUT_LAYER = keras_cv.layers.RandomCutout(
+    height_factor=0.2, width_factor=0.2
+)
 
 @tf.function
 def augment_for_finetuning(sample: dict) -> dict:
@@ -90,23 +83,106 @@ def augment_for_finetuning(sample: dict) -> dict:
     if tf.random.uniform([]) > 0.9:
         image = tf.image.rgb_to_grayscale(image)
         image = tf.image.grayscale_to_rgb(image)
-    if tf.random.uniform([]) > 0.5 and KERAS_CV_AVAILABLE:
+    if tf.random.uniform([]) > 0.5:
         image = GAUSSIAN_BLUR_LAYER(image, training=True)
     if tf.random.uniform([]) > 0.5:
         image = CUTOUT_LAYER(image, training=True)
     augmented_image = tf.clip_by_value(image, 0.0, 1.0)
     return {**sample, 'image': augmented_image}
 
-def process_validation(images, labels, num_classes: int):
+# ==============================================================================
+# Advanced KerasCV Augmentations (MixUp, CutMix, RandAugment, Pipelines)
+# ==============================================================================
+import keras_cv
+import tensorflow as tf
+
+# --- MixUp ---
+def mixup_batch_fn(num_classes, alpha=0.2):
     """
-    Process validation data (convert labels to one-hot).
-    
-    Args:
-        images: Batch of images
-        labels: Batch of labels
-        num_classes: Number of classes
-    
-    Returns:
-        Tuple of (images, one_hot_labels)
+    Returns a function that applies MixUp to a batch of images and labels.
+    Usage:
+        ds = ds.map(mixup_batch_fn(num_classes=102, alpha=0.2), num_parallel_calls=tf.data.AUTOTUNE)
     """
-    return images, labels
+    mixup = keras_cv.layers.MixUp(alpha=alpha)
+    def _mixup(images, labels):
+        oh_labels = tf.one_hot(labels, num_classes)
+        batch = mixup({"images": images, "labels": oh_labels})
+        return batch["images"], batch["labels"]
+    return _mixup
+
+# --- CutMix ---
+def cutmix_batch_fn(num_classes, alpha=0.5):
+    """
+    Returns a function that applies CutMix to a batch of images and labels.
+    Usage:
+        ds = ds.map(cutmix_batch_fn(num_classes=102, alpha=0.5), num_parallel_calls=tf.data.AUTOTUNE)
+    """
+    cutmix = keras_cv.layers.CutMix(alpha=alpha)
+    def _cutmix(images, labels):
+        oh_labels = tf.one_hot(labels, num_classes)
+        batch = cutmix({"images": images, "labels": oh_labels})
+        return batch["images"], batch["labels"]
+    return _cutmix
+
+# --- RandAugment as a preprocessing layer ---
+def get_randaugment_layer(value_range=(0, 255), augmentations_per_image=2, magnitude=0.3):
+    """
+    Returns a RandAugment layer for use in preprocessing or tf.data pipelines.
+    Usage:
+        layer = get_randaugment_layer()
+        ds = ds.map(lambda img, lbl: (layer(img), lbl))
+    """
+    return keras_cv.layers.RandAugment(
+        value_range=value_range,
+        augmentations_per_image=augmentations_per_image,
+        magnitude=magnitude
+    )
+
+# --- Standard RandAugment Policy ---
+def get_standard_randaugment_policy(value_range=(0, 255), magnitude=0.3, magnitude_stddev=0.01):
+    """
+    Returns a list of standard RandAugment layers (policy).
+    Usage:
+        layers = get_standard_randaugment_policy()
+    """
+    return keras_cv.layers.RandAugment.get_standard_policy(
+        value_range=value_range,
+        magnitude=magnitude,
+        magnitude_stddev=magnitude_stddev
+    )
+
+# --- RandomAugmentationPipeline ---
+def get_random_augmentation_pipeline(auglayers, augmentations_per_image=2, rate=0.7):
+    """
+    Returns a RandomAugmentationPipeline layer.
+    Usage:
+        pipeline = get_random_augmentation_pipeline(auglayers)
+        ds = ds.map(lambda img, lbl: (pipeline(img), lbl))
+    """
+    return keras_cv.layers.RandomAugmentationPipeline(
+        layers=auglayers,
+        augmentations_per_image=augmentations_per_image,
+        rate=rate
+    )
+
+# --- RandomChoice Pipeline ---
+def get_random_choice_pipeline(auglayers):
+    """
+    Returns a RandomChoice layer from a list of augmentation layers.
+    Usage:
+        pipeline = get_random_choice_pipeline(auglayers)
+        ds = ds.map(lambda img, lbl: (pipeline(img), lbl))
+    """
+    return keras_cv.layers.RandomChoice(layers=auglayers)
+
+# --- Example usage in your notebook or script ---
+# ds_train_MixUp = ds_train.map(mixup_batch_fn(num_classes=102), num_parallel_calls=tf.data.AUTOTUNE)
+# ds_train_CutMix = ds_train.map(cutmix_batch_fn(num_classes=102), num_parallel_calls=tf.data.AUTOTUNE)
+# randaugment_layer = get_randaugment_layer()
+# ds_aug = ds_train.map(lambda img, lbl: (randaugment_layer(img), lbl))
+# policy = get_standard_randaugment_policy()
+# auglayers = policy[:4] + [keras_cv.layers.RandomCutout(0.5, 0.5)]
+# pipeline = get_random_augmentation_pipeline(auglayers)
+# ds_aug = ds_train.map(lambda img, lbl: (pipeline(img), lbl))
+# pipeline2 = get_random_choice_pipeline(auglayers)
+# ds_aug2 = ds_train.map(lambda img, lbl: (pipeline2(img), lbl)) 

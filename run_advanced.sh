@@ -49,14 +49,6 @@ LABEL_KEY="label"         # e.g. "label"
 TRAIN_SPLIT="train"       # e.g. "train[:80%]"
 TEST_SPLIT="test"         # e.g. "train[80%:]"
 
-# Orthogonality regularization
-ORTHOGONALITY_WEIGHT=0.0   # e.g. 0.1 for moderate regularization, 1.0 for strong regularization
-
-# Augmentation settings
-USE_KERAS_CV_AUGMENTATION=true      # Set to false to use standard augmentation
-AUGMENTATION_TYPE="comprehensive"    # Options: light, comprehensive, aggressive
-PRETRAIN_AUGMENTATION_TYPE="comprehensive"  # Options: light, comprehensive, aggressive
-
 python src/main.py \
   --dataset "$DATASET" \
   --learning_rate $LEARNING_RATE \
@@ -87,7 +79,4 @@ python src/main.py \
   --scheduler_decay_factor $SCHEDULER_DECAY_FACTOR \
   --scheduler_warmup_steps $SCHEDULER_WARMUP_STEPS \
   --scheduler_end_value $SCHEDULER_END_VALUE \
-  --scheduler_power $SCHEDULER_POWER \
-  --orthogonality_weight $ORTHOGONALITY_WEIGHT \
-  --augmentation_type $AUGMENTATION_TYPE \
-  --pretrain_augmentation_type $PRETRAIN_AUGMENTATION_TYPE 
+  --scheduler_power $SCHEDULER_POWER 

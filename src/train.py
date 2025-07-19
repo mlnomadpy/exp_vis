@@ -10,10 +10,7 @@ from tqdm import tqdm
 import os
 import orbax.checkpoint as orbax
 from models import YatCNN, ConvAutoencoder
-from data import (
-    create_image_folder_dataset, get_image_processor, get_tfds_processor, 
-    augment_for_pretraining, augment_for_finetuning,
-)
+from data import create_image_folder_dataset, get_image_processor, get_tfds_processor, augment_for_pretraining, augment_for_finetuning
 import tensorflow_datasets as tfds
 import tensorflow as tf
 from logger import log_metrics
@@ -118,18 +115,18 @@ def create_optimizer_with_scheduler(
         **kwargs: Additional optimizer and scheduler parameters
     
     Returns:
-        Callable: Optimizer constructor function that takes no arguments
+        Callable: Optimizer constructor function
     """
-    # Create the learning rate schedule
-    schedule = create_learning_rate_schedule(
-        scheduler_type=scheduler_type,
-        learning_rate=learning_rate,
-        total_steps=total_steps,
-        **kwargs
-    )
-    
-    def optimizer_constructor():
-        # Create the base optimizer with the pre-configured schedule
+    def optimizer_constructor(lr):
+        # Create the learning rate schedule
+        schedule = create_learning_rate_schedule(
+            scheduler_type=scheduler_type,
+            learning_rate=lr,
+            total_steps=total_steps,
+            **kwargs
+        )
+        
+        # Create the base optimizer
         if optimizer_type == 'adam':
             return optax.adam(
                 learning_rate=schedule,
@@ -210,41 +207,6 @@ def clip_grads(grads, max_norm):
     norm = jnp.sqrt(sum(jnp.sum(g ** 2) for g in jax.tree_util.tree_leaves(grads)))
     clip_coef = jnp.minimum(max_norm / (norm + 1e-6), 1.0)
     return jax.tree_util.tree_map(lambda g: g * clip_coef, grads)
-
-def get_current_learning_rate(optimizer, step, scheduler_type, scheduler_constructor=None, base_lr=None):
-    """
-    Get the current learning rate from the optimizer or scheduler.
-    
-    Args:
-        optimizer: The optimizer instance
-        step: Current training step
-        scheduler_type: Type of scheduler being used
-        scheduler_constructor: Constructor function for the scheduler (if available)
-        base_lr: Base learning rate (fallback)
-    
-    Returns:
-        float: Current learning rate
-    """
-    if scheduler_type == 'constant':
-        return base_lr if base_lr is not None else 0.001
-    
-    # Try to get learning rate from scheduler constructor
-    if scheduler_constructor is not None:
-        try:
-            return float(scheduler_constructor().learning_rate(step))
-        except:
-            pass
-    
-    # Try to get from optimizer state
-    try:
-        optimizer_state = optimizer.state
-        if hasattr(optimizer_state, 'learning_rate'):
-            return float(optimizer_state.learning_rate(step))
-    except:
-        pass
-    
-    # Fallback to base learning rate
-    return base_lr if base_lr is not None else 0.001
 
 def simo2_loss_fn(model, batch, num_classes, k, embedding_dim, indices_for_same, indices_for_means, indices_for_diff, alpha):
     """SIMO2 loss function."""
@@ -488,19 +450,6 @@ def _pretrain_simo2_loop(
     print(f"🔧 Optimizer: {optimizer_type}")
     print(f"🔧 Scheduler: {scheduler_type}")
     print(f"🔧 Total steps: {total_steps}")
-    print(f"🔧 Initial learning rate: {learning_rate}")
-    
-    # Test scheduler if not constant
-    if scheduler_type != 'constant':
-        test_scheduler = create_learning_rate_schedule(
-            scheduler_type=scheduler_type,
-            learning_rate=learning_rate,
-            total_steps=total_steps,
-            **scheduler_params
-        )
-        print(f"🔧 Scheduler test - Step 0: {float(test_scheduler(0)):.6f}")
-        print(f"🔧 Scheduler test - Step {total_steps//2}: {float(test_scheduler(total_steps//2)):.6f}")
-        print(f"🔧 Scheduler test - Step {total_steps-1}: {float(test_scheduler(total_steps-1)):.6f}")
     
     # Create optimizer with scheduler
     if scheduler_type != 'constant':
@@ -511,10 +460,8 @@ def _pretrain_simo2_loop(
             total_steps=total_steps,
             **scheduler_params
         )
-        optimizer = nnx.Optimizer(model, optimizer_constructor())
-    else:
-        # For constant learning rate, use the original optimizer constructor
-        optimizer = nnx.Optimizer(model, optimizer_constructor(learning_rate))
+    
+    optimizer = nnx.Optimizer(model, optimizer_constructor(learning_rate))
     
     # Training loop
     key = jax.random.PRNGKey(rng_seed)
@@ -544,20 +491,13 @@ def _pretrain_simo2_loop(
         )
         
         # Log metrics
-        current_step = epoch * steps_per_epoch
-        current_lr = get_current_learning_rate(
-            optimizer, current_step, scheduler_type, 
-            scheduler_constructor=optimizer_constructor if scheduler_type != 'constant' else None,
-            base_lr=learning_rate
-        )
-        
         wandb.log({
             'Training Loss': float(loss), 
             'Epoch': epoch+1, 
             'Similar Loss': float(same_loss), 
             'Mean Embedding Loss': float(mean_loss), 
             'Different Loss': float(diff_loss),
-            'Learning Rate': current_lr
+            'Learning Rate': float(optimizer.learning_rate(epoch * steps_per_epoch)) if hasattr(optimizer, 'learning_rate') else learning_rate
         })
         
         # Save model periodically
@@ -584,13 +524,9 @@ def _pretrain_simo2_loop(
     
     return save_dir
 
-def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0, orthogonality_weight: float = 0.0):
+def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0):
     logits = model(batch['image'], training=True)
-    
-    # Convert integer labels to one-hot
-    labels = batch['label']
-    one_hot_labels = jax.nn.one_hot(labels, num_classes=num_classes)
-    
+    one_hot_labels = jax.nn.one_hot(batch['label'], num_classes=num_classes)
     if label_smoothing > 0:
         smoothed_labels = optax.smooth_labels(one_hot_labels, alpha=label_smoothing)
     else:
@@ -598,49 +534,21 @@ def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0, orthog
     loss = optax.softmax_cross_entropy(
         logits=logits, labels=smoothed_labels
     ).mean()
-    
-    orthogonality_loss = 0.0
-    # Add orthogonality regularization if weight > 0
-    if orthogonality_weight > 0:
-        # Get the weight matrix W from the output layer
-        W = model.out_linear.kernel.value  # Shape: (1024, num_classes)
-        
-        # Compute W.W^T
-        WWT = jnp.dot(W.T, W)  # Shape: (num_classes, num_classes)
-        
-        # Create mask to exclude diagonal elements
-        mask = jnp.ones_like(WWT) - jnp.eye(WWT.shape[0])
-        
-        # Compute orthogonality loss: sum of squared off-diagonal elements
-        orthogonality_loss = jnp.sum((WWT * mask) ** 2)
-        
-        # Add to total loss
-        loss = loss + orthogonality_weight * orthogonality_loss
-    
-    # Return (loss, aux) where aux contains logits and orthogonality_loss
-    return loss, (logits, orthogonality_loss)
+    return loss, logits
 
-@nnx.jit(static_argnames=['num_classes', 'label_smoothing', 'orthogonality_weight'])
-def train_step(model, optimizer: nnx.Optimizer, metrics: nnx.MultiMetric, batch, num_classes: int, label_smoothing: float, orthogonality_weight: float = 0.0):
+@nnx.jit(static_argnames=['num_classes', 'label_smoothing'])
+def train_step(model, optimizer: nnx.Optimizer, metrics: nnx.MultiMetric, batch, num_classes: int, label_smoothing: float):
     def loss_fn_wrapped(m, b):
-        return loss_fn(m, b, num_classes=num_classes, label_smoothing=label_smoothing, orthogonality_weight=orthogonality_weight)
+        return loss_fn(m, b, num_classes=num_classes, label_smoothing=label_smoothing)
     grad_fn = nnx.value_and_grad(loss_fn_wrapped, has_aux=True)
-    (loss, (logits, orthogonality_loss)), grads = grad_fn(model, batch)
-    
-    # Labels are already in integer format
-    labels = batch['label']
-    
-    metrics.update(loss=loss, logits=logits, labels=labels, orthogonality_loss=orthogonality_loss)
+    (loss, logits), grads = grad_fn(model, batch)
+    metrics.update(loss=loss, logits=logits, labels=batch['label'])
     optimizer.update(grads)
 
 @nnx.jit(static_argnames=['num_classes'])
 def eval_step(model, metrics: nnx.MultiMetric, batch, num_classes: int):
-    loss, (logits, orthogonality_loss) = loss_fn(model, batch, num_classes=num_classes, label_smoothing=0.0, orthogonality_weight=0.0)
-    
-    # Labels are already in integer format
-    labels = batch['label']
-    
-    metrics.update(loss=loss, logits=logits, labels=labels, orthogonality_loss=orthogonality_loss)
+    loss, logits = loss_fn(model, batch, num_classes=num_classes, label_smoothing=0.0)
+    metrics.update(loss=loss, logits=logits, labels=batch['label'])
 
 def autoencoder_loss_fn(model: ConvAutoencoder, batch):
     augmented_image = batch['augmented_image']
@@ -850,18 +758,12 @@ def _pretrain_autoencoder_loop(
     current_batch_size = dataset_config.get('pretrain_batch_size', fallback_configs['pretrain_batch_size'])
     current_num_epochs = dataset_config.get('pretrain_epochs', fallback_configs['pretrain_epochs'])
     
-    # Get augmentation configuration for pretraining
-    pretrain_augmentation_type = dataset_config.get('pretrain_augmentation_type', 'comprehensive')
-    use_random_choice_augmentation = dataset_config.get('use_random_choice_augmentation', True)
-    
     # Debug: Print what config values are being used
     print(f"🔧 Pretraining config values:")
     print(f"   image_size: {image_size}")
     print(f"   input_channels: {input_channels}")
     print(f"   current_batch_size: {current_batch_size}")
     print(f"   current_num_epochs: {current_num_epochs}")
-    print(f"   pretrain_augmentation_type: {pretrain_augmentation_type}")
-    print(f"   use_random_choice_augmentation: {use_random_choice_augmentation}")
     print(f"   Full dataset_config: {dataset_config}")
     if is_path:
         train_ds, _, class_names, train_size = create_image_folder_dataset(dataset_name, validation_split=0.01, seed=42)
@@ -880,12 +782,9 @@ def _pretrain_autoencoder_loop(
         processor = get_tfds_processor(image_size, dataset_config['image_key'], dataset_config['label_key'])
         base_train_ds = base_train_ds.map(processor)
     def apply_augmentations(x):
-        print("🎨 Using Standard Augmentation for Pretraining")
-        augmented_image = augment_for_pretraining(x['image'])
-        
         return {
             'original_image': x['image'],
-            'augmented_image': augmented_image,
+            'augmented_image': augment_for_pretraining(x['image']),
             'label': x['label'] # Keep label for t-SNE
         }
     augmented_train_ds = base_train_ds.map(apply_augmentations, num_parallel_calls=tf.data.AUTOTUNE)
@@ -901,33 +800,18 @@ def _pretrain_autoencoder_loop(
     print(f"🔧 Autoencoder Optimizer: {optimizer_type}")
     print(f"🔧 Autoencoder Scheduler: {scheduler_type}")
     print(f"🔧 Total steps: {total_steps}")
-    print(f"🔧 Initial learning rate: {learning_rate}")
-    
-    # Test scheduler if not constant
-    if scheduler_type != 'constant':
-        test_scheduler = create_learning_rate_schedule(
-            scheduler_type=scheduler_type,
-            learning_rate=learning_rate,
-            total_steps=total_steps,
-            **scheduler_params
-        )
-        print(f"🔧 Scheduler test - Step 0: {float(test_scheduler(0)):.6f}")
-        print(f"🔧 Scheduler test - Step {total_steps//2}: {float(test_scheduler(total_steps//2)):.6f}")
-        print(f"🔧 Scheduler test - Step {total_steps-1}: {float(test_scheduler(total_steps-1)):.6f}")
     
     # Create optimizer with scheduler
     if scheduler_type != 'constant':
-        scheduler_optimizer_constructor = create_optimizer_with_scheduler(
+        optimizer_constructor = create_optimizer_with_scheduler(
             optimizer_type=optimizer_type,
             learning_rate=learning_rate,
             scheduler_type=scheduler_type,
             total_steps=total_steps,
             **scheduler_params
         )
-        optimizer = nnx.Optimizer(autoencoder_model, scheduler_optimizer_constructor())
-    else:
-        # For constant learning rate, use the original optimizer constructor
-        optimizer = nnx.Optimizer(autoencoder_model, optimizer_constructor(learning_rate))
+    
+    optimizer = nnx.Optimizer(autoencoder_model, optimizer_constructor(learning_rate))
     print(f"Pre-training for {current_num_epochs} epochs ({total_steps} steps)...")
     for epoch in range(current_num_epochs):
         epoch_train_iter = augmented_train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
@@ -961,7 +845,6 @@ def _train_model_loop(
     fallback_configs: dict,
     pretrained_encoder_path: tp.Optional[str] = None,
     freeze_encoder: bool = False,
-    orthogonality_weight: float = 0.0,
 ):
     stage = "Fine-tuning with Pretrained Weights" if pretrained_encoder_path else "Training from Scratch"
     if freeze_encoder and pretrained_encoder_path:
@@ -983,9 +866,6 @@ def _train_model_loop(
     print(f"   current_eval_every: {current_eval_every}")
     print(f"   current_batch_size: {current_batch_size}")
     print(f"   label_smooth: {label_smooth}")
-    print(f"   orthogonality_weight: {orthogonality_weight}")
-    if orthogonality_weight > 0:
-        print(f"   ✅ Orthogonality regularization enabled with weight: {orthogonality_weight}")
     print(f"   Full dataset_config: {dataset_config}")
     if is_path:
         split_percentage = dataset_config.get('test_split_percentage', 0.2)
@@ -994,12 +874,7 @@ def _train_model_loop(
         processor = get_image_processor(image_size=image_size, num_channels=input_channels)
         train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
-        
-        # Apply standard augmentation
-        print("🎨 Using Standard Augmentation")
         train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
-        train_ds = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
-        test_ds = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
     else: # TFDS logic
         (train_ds, test_ds), ds_info = tfds.load(
             dataset_name,
@@ -1014,12 +889,7 @@ def _train_model_loop(
         processor = get_tfds_processor(image_size, dataset_config['image_key'], dataset_config['label_key'])
         train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
-        
-        # Apply standard augmentation
-        print("🎨 Using Standard Augmentation")
         train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
-        train_ds = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
-        test_ds = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
     model = model_class(num_classes=num_classes, input_channels=input_channels, rngs=nnx.Rngs(rng_seed))
     if pretrained_encoder_path:
         print(f"💾 Loading pretrained encoder weights from {pretrained_encoder_path}...")
@@ -1040,23 +910,10 @@ def _train_model_loop(
     print(f"🔧 Training Optimizer: {optimizer_type}")
     print(f"🔧 Training Scheduler: {scheduler_type}")
     print(f"🔧 Total steps: {total_steps}")
-    print(f"🔧 Initial learning rate: {learning_rate}")
-    
-    # Test scheduler if not constant
-    if scheduler_type != 'constant':
-        test_scheduler = create_learning_rate_schedule(
-            scheduler_type=scheduler_type,
-            learning_rate=learning_rate,
-            total_steps=total_steps,
-            **scheduler_params
-        )
-        print(f"🔧 Scheduler test - Step 0: {float(test_scheduler(0)):.6f}")
-        print(f"🔧 Scheduler test - Step {total_steps//2}: {float(test_scheduler(total_steps//2)):.6f}")
-        print(f"🔧 Scheduler test - Step {total_steps-1}: {float(test_scheduler(total_steps-1)):.6f}")
     
     # Create optimizer with scheduler
     if scheduler_type != 'constant':
-        scheduler_optimizer_constructor = create_optimizer_with_scheduler(
+        optimizer_constructor = create_optimizer_with_scheduler(
             optimizer_type=optimizer_type,
             learning_rate=learning_rate,
             scheduler_type=scheduler_type,
@@ -1072,10 +929,7 @@ def _train_model_loop(
             return 'frozen'
         params = nnx.state(model, nnx.Param)
         param_labels = jax.tree_util.tree_map_with_path(path_partition_fn, params)
-        if scheduler_type != 'constant':
-            trainable_tx = scheduler_optimizer_constructor()
-        else:
-            trainable_tx = optimizer_constructor(learning_rate)
+        trainable_tx = optimizer_constructor(learning_rate)
         frozen_tx = optax.set_to_zero()
         tx = optax.multi_transform(
             {'trainable': trainable_tx, 'frozen': frozen_tx},
@@ -1083,58 +937,33 @@ def _train_model_loop(
         )
         optimizer = nnx.Optimizer(model, tx)
     else:
-        if scheduler_type != 'constant':
-            optimizer = nnx.Optimizer(model, scheduler_optimizer_constructor())
-        else:
-            optimizer = nnx.Optimizer(model, optimizer_constructor(learning_rate))
-    metrics_computer = nnx.MultiMetric(
-        accuracy=nnx.metrics.Accuracy(), 
-        loss=nnx.metrics.Average('loss'),
-        orthogonality_loss=nnx.metrics.Average('orthogonality_loss')
-    )
+        optimizer = nnx.Optimizer(model, optimizer_constructor(learning_rate))
+    metrics_computer = nnx.MultiMetric(accuracy=nnx.metrics.Accuracy(), loss=nnx.metrics.Average('loss'))
     metrics_history = {'train_loss': [], 'train_accuracy': [], 'test_loss': [], 'test_accuracy': []}
     steps_per_epoch = train_size // current_batch_size
     total_steps = current_num_epochs * steps_per_epoch
     print(f"Starting training for {total_steps} steps...")
     global_step_counter = 0
     for epoch in range(current_num_epochs):
-        # Prepare training iterator - datasets are already batched and processed
-        epoch_train_iter = train_ds.as_numpy_iterator()
-        
+        epoch_train_iter = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
         pbar = tqdm(epoch_train_iter, total=steps_per_epoch, desc=f"Epoch {epoch + 1}/{current_num_epochs} ({stage})")
-        
         for batch_data in pbar:
-            # Both augmentation types now return dict format
-            batch_dict = batch_data
-            
-            train_step(model, optimizer, metrics_computer, batch_dict, num_classes=num_classes, label_smoothing=label_smooth, orthogonality_weight=orthogonality_weight)
-            global_step_counter += 1
-            
-            # Always evaluate at specified intervals
+            train_step(model, optimizer, metrics_computer, batch_data, num_classes=num_classes, label_smoothing=label_smooth)
             if global_step_counter > 0 and (global_step_counter % current_eval_every == 0 or global_step_counter >= total_steps -1):
                 train_metrics = metrics_computer.compute()
                 metrics_history['train_loss'].append(train_metrics['loss'])
                 metrics_history['train_accuracy'].append(train_metrics['accuracy'])
                 metrics_computer.reset()
-                
-                # Evaluate on test dataset (never augmented)
-                current_test_iter = test_ds.as_numpy_iterator()
+                current_test_iter = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
                 for test_batch in current_test_iter:
                     eval_step(model, metrics_computer, test_batch, num_classes)
-                
                 test_metrics = metrics_computer.compute()
                 metrics_history['test_loss'].append(test_metrics['loss'])
                 metrics_history['test_accuracy'].append(test_metrics['accuracy'])
                 metrics_computer.reset()
                 pbar.set_postfix({'Train Acc': f"{train_metrics['accuracy']:.4f}", 'Test Acc': f"{test_metrics['accuracy']:.4f}"})
-                
                 # Log progress to wandb
-                current_lr = get_current_learning_rate(
-                    optimizer, global_step_counter, scheduler_type,
-                    scheduler_constructor=scheduler_optimizer_constructor if scheduler_type != 'constant' else None,
-                    base_lr=learning_rate
-                )
-                
+                current_lr = float(optimizer.learning_rate(global_step_counter)) if hasattr(optimizer, 'learning_rate') else learning_rate
                 log_metrics({
                     'step': global_step_counter,
                     'train_loss': train_metrics['loss'],
@@ -1142,11 +971,9 @@ def _train_model_loop(
                     'test_loss': test_metrics['loss'],
                     'test_accuracy': test_metrics['accuracy'],
                     'learning_rate': current_lr,
-                    'orthogonality_loss': float(train_metrics.get('orthogonality_loss', 0.0)),
                 }, step=global_step_counter)
-            
-            if global_step_counter >= total_steps: 
-                break
+            global_step_counter += 1
+        if global_step_counter >= total_steps: break
     print(f"✅ {stage} complete on {dataset_name} after {global_step_counter} steps!")
     if metrics_history['test_accuracy']:
         print(f"    Final Test Accuracy: {metrics_history['test_accuracy'][-1]:.4f}")
