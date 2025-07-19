@@ -553,21 +553,21 @@ def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0, orthog
         # Add to total loss
         loss = loss + orthogonality_weight * orthogonality_loss
     
-    return loss, logits, orthogonality_loss
+    # Return (loss, aux) where aux contains logits and orthogonality_loss
+    return loss, (logits, orthogonality_loss)
 
 @nnx.jit(static_argnames=['num_classes', 'label_smoothing', 'orthogonality_weight'])
 def train_step(model, optimizer: nnx.Optimizer, metrics: nnx.MultiMetric, batch, num_classes: int, label_smoothing: float, orthogonality_weight: float = 0.0):
     def loss_fn_wrapped(m, b):
         return loss_fn(m, b, num_classes=num_classes, label_smoothing=label_smoothing, orthogonality_weight=orthogonality_weight)
     grad_fn = nnx.value_and_grad(loss_fn_wrapped, has_aux=True)
-    (loss, logits, orthogonality_loss), grads = grad_fn(model, batch)
-    metrics.update(loss=loss, logits=logits, labels=batch['label'])
+    (loss, (logits, orthogonality_loss)), grads = grad_fn(model, batch)
+    metrics.update(loss=loss, logits=logits, labels=batch['label'], orthogonality_loss=orthogonality_loss)
     optimizer.update(grads)
-    return orthogonality_loss
 
 @nnx.jit(static_argnames=['num_classes'])
 def eval_step(model, metrics: nnx.MultiMetric, batch, num_classes: int):
-    loss, logits, _ = loss_fn(model, batch, num_classes=num_classes, label_smoothing=0.0, orthogonality_weight=0.0)
+    loss, (logits, _) = loss_fn(model, batch, num_classes=num_classes, label_smoothing=0.0, orthogonality_weight=0.0)
     metrics.update(loss=loss, logits=logits, labels=batch['label'])
 
 def autoencoder_loss_fn(model: ConvAutoencoder, batch):
@@ -962,7 +962,11 @@ def _train_model_loop(
         optimizer = nnx.Optimizer(model, tx)
     else:
         optimizer = nnx.Optimizer(model, optimizer_constructor(learning_rate))
-    metrics_computer = nnx.MultiMetric(accuracy=nnx.metrics.Accuracy(), loss=nnx.metrics.Average('loss'))
+    metrics_computer = nnx.MultiMetric(
+        accuracy=nnx.metrics.Accuracy(), 
+        loss=nnx.metrics.Average('loss'),
+        orthogonality_loss=nnx.metrics.Average('orthogonality_loss')
+    )
     metrics_history = {'train_loss': [], 'train_accuracy': [], 'test_loss': [], 'test_accuracy': []}
     steps_per_epoch = train_size // current_batch_size
     total_steps = current_num_epochs * steps_per_epoch
@@ -972,7 +976,7 @@ def _train_model_loop(
         epoch_train_iter = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
         pbar = tqdm(epoch_train_iter, total=steps_per_epoch, desc=f"Epoch {epoch + 1}/{current_num_epochs} ({stage})")
         for batch_data in pbar:
-            orthogonality_loss = train_step(model, optimizer, metrics_computer, batch_data, num_classes=num_classes, label_smoothing=label_smooth, orthogonality_weight=orthogonality_weight)
+            train_step(model, optimizer, metrics_computer, batch_data, num_classes=num_classes, label_smoothing=label_smooth, orthogonality_weight=orthogonality_weight)
             if global_step_counter > 0 and (global_step_counter % current_eval_every == 0 or global_step_counter >= total_steps -1):
                 train_metrics = metrics_computer.compute()
                 metrics_history['train_loss'].append(train_metrics['loss'])
@@ -995,7 +999,7 @@ def _train_model_loop(
                     'test_loss': test_metrics['loss'],
                     'test_accuracy': test_metrics['accuracy'],
                     'learning_rate': current_lr,
-                    'orthogonality_loss': float(orthogonality_loss) if orthogonality_weight > 0 else 0.0,
+                    'orthogonality_loss': float(train_metrics.get('orthogonality_loss', 0.0)),
                 }, step=global_step_counter)
             global_step_counter += 1
         if global_step_counter >= total_steps: break
