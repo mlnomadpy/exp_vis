@@ -66,7 +66,7 @@ def main():
 
     dataset_configs = {
         'cifar10': {
-            'input_channels': 3, 'input_dim': (32, 32), 'label_smooth': 0.1,
+            'input_channels': 3, 'input_dim': (32, 32), 'label_smooth': 0.2,
             'train_split': 'train', 'test_split': 'test',
             'image_key': 'image', 'label_key': 'label', 
             'num_epochs': 100, 'eval_every': 300, 'batch_size': 256,

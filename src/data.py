@@ -499,22 +499,23 @@ def augment_with_keras_cv(images, labels, num_classes: int, augmentation_type: s
     if image_augmenter is not None:
         images = image_augmenter(images)
     
-    # Then, apply mixing augmentations if num_classes is provided
-    if num_classes is not None:
-        mixing_augmenter = get_mixing_augmenter(augmentation_type)
-        if mixing_augmenter is not None:
-            # Convert labels to one-hot for mixing
-            one_hot_labels = tf.one_hot(labels, num_classes)
-            inputs = {"images": images, "labels": one_hot_labels}
-            output = mixing_augmenter(inputs)
-            images = output["images"]
-            labels = output["labels"]  # These will be one-hot
-        else:
-            # If no mixing, keep labels as integers
-            pass
-    else:
-        # No mixing, keep labels as integers
-        pass
+            # Then, apply mixing augmentations if num_classes is provided
+        # DISABLED: Mixing augmentations can make training harder
+        # if num_classes is not None:
+        #     mixing_augmenter = get_mixing_augmenter(augmentation_type)
+        #     if mixing_augmenter is not None:
+        #         # Convert labels to one-hot for mixing
+        #         one_hot_labels = tf.one_hot(labels, num_classes)
+        #         inputs = {"images": images, "labels": one_hot_labels}
+        #         output = mixing_augmenter(inputs)
+        #         images = output["images"]
+        #         labels = output["labels"]  # These will be one-hot
+        #     else:
+        #         # If no mixing, keep labels as integers
+        #         pass
+        # else:
+        #     # No mixing, keep labels as integers
+        #     pass
     
     return images, labels
 
