@@ -13,8 +13,7 @@ from models import YatCNN, ConvAutoencoder
 from data import (
     create_image_folder_dataset, get_image_processor, get_tfds_processor, 
     augment_for_pretraining, augment_for_finetuning,
-    augment_with_random_choice, augment_with_random_choice_batch,
-    create_augmented_dataset, augment_with_keras_cv, process_validation
+    augment_with_random_choice, augment_with_random_choice_batch
 )
 import tensorflow_datasets as tfds
 import tensorflow as tf
@@ -589,16 +588,9 @@ def _pretrain_simo2_loop(
 def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0, orthogonality_weight: float = 0.0):
     logits = model(batch['image'], training=True)
     
-    # Handle both regular integer labels and one-hot labels from KerasCV augmentation
+    # Convert integer labels to one-hot
     labels = batch['label']
-    
-    # Check if labels are already one-hot encoded (from KerasCV CutMix/MixUp)
-    if labels.ndim == 2:
-        # Labels are already one-hot encoded
-        one_hot_labels = labels
-    else:
-        # Regular integer labels - convert to one-hot
-        one_hot_labels = jax.nn.one_hot(labels, num_classes=num_classes)
+    one_hot_labels = jax.nn.one_hot(labels, num_classes=num_classes)
     
     if label_smoothing > 0:
         smoothed_labels = optax.smooth_labels(one_hot_labels, alpha=label_smoothing)
@@ -636,11 +628,8 @@ def train_step(model, optimizer: nnx.Optimizer, metrics: nnx.MultiMetric, batch,
     grad_fn = nnx.value_and_grad(loss_fn_wrapped, has_aux=True)
     (loss, (logits, orthogonality_loss)), grads = grad_fn(model, batch)
     
-    # Convert labels to integer format for metrics if they're one-hot
+    # Labels are already in integer format
     labels = batch['label']
-    # If labels are one-hot encoded (from KerasCV CutMix/MixUp), convert to integers
-    if labels.ndim == 2:
-        labels = jnp.argmax(labels, axis=-1)
     
     metrics.update(loss=loss, logits=logits, labels=labels, orthogonality_loss=orthogonality_loss)
     optimizer.update(grads)
@@ -649,11 +638,8 @@ def train_step(model, optimizer: nnx.Optimizer, metrics: nnx.MultiMetric, batch,
 def eval_step(model, metrics: nnx.MultiMetric, batch, num_classes: int):
     loss, (logits, orthogonality_loss) = loss_fn(model, batch, num_classes=num_classes, label_smoothing=0.0, orthogonality_weight=0.0)
     
-    # Convert labels to integer format for metrics if they're one-hot
+    # Labels are already in integer format
     labels = batch['label']
-    # If labels are one-hot encoded (from KerasCV CutMix/MixUp), convert to integers
-    if labels.ndim == 2:
-        labels = jnp.argmax(labels, axis=-1)
     
     metrics.update(loss=loss, logits=logits, labels=labels, orthogonality_loss=orthogonality_loss)
 
@@ -994,10 +980,6 @@ def _train_model_loop(
     current_batch_size = dataset_config.get('batch_size', fallback_configs['batch_size'])
     label_smooth = dataset_config.get('label_smooth', fallback_configs['label_smooth'])
     
-    # Get augmentation configuration
-    augmentation_type = dataset_config.get('augmentation_type', 'comprehensive')
-    use_keras_cv_augmentation = dataset_config.get('use_keras_cv_augmentation', True)
-    
     # Debug: Print what config values are being used
     print(f"🔧 Training config values:")
     print(f"   image_size: {image_size}")
@@ -1007,12 +989,8 @@ def _train_model_loop(
     print(f"   current_batch_size: {current_batch_size}")
     print(f"   label_smooth: {label_smooth}")
     print(f"   orthogonality_weight: {orthogonality_weight}")
-    print(f"   augmentation_type: {augmentation_type}")
-    print(f"   use_keras_cv_augmentation: {use_keras_cv_augmentation}")
     if orthogonality_weight > 0:
         print(f"   ✅ Orthogonality regularization enabled with weight: {orthogonality_weight}")
-    if use_keras_cv_augmentation:
-        print(f"   🎨 KerasCV augmentation enabled: {augmentation_type}")
     print(f"   Full dataset_config: {dataset_config}")
     if is_path:
         split_percentage = dataset_config.get('test_split_percentage', 0.2)
@@ -1022,21 +1000,11 @@ def _train_model_loop(
         train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         
-        # Apply augmentation based on configuration
-        if use_keras_cv_augmentation:
-            print(f"🎨 Using KerasCV Augmentation (type: {augmentation_type})")
-            # Create augmented training dataset using the clean KerasCV approach
-            train_ds = create_augmented_dataset(
-                train_ds, num_classes, mode="train", 
-                augmentation_type=augmentation_type, batch_size=current_batch_size
-            )
-            # Test dataset should NEVER be augmented - just batch and prefetch
-            test_ds = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
-        else:
-            print("🎨 Using Standard Augmentation")
-            train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
-            train_ds = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
-            test_ds = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
+        # Apply standard augmentation
+        print("🎨 Using Standard Augmentation")
+        train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
+        train_ds = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
+        test_ds = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
     else: # TFDS logic
         (train_ds, test_ds), ds_info = tfds.load(
             dataset_name,
@@ -1052,21 +1020,11 @@ def _train_model_loop(
         train_ds = train_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         
-        # Apply augmentation based on configuration
-        if use_keras_cv_augmentation:
-            print(f"🎨 Using KerasCV Augmentation (type: {augmentation_type})")
-            # Create augmented training dataset using the clean KerasCV approach
-            train_ds = create_augmented_dataset(
-                train_ds, num_classes, mode="train", 
-                augmentation_type=augmentation_type, batch_size=current_batch_size
-            )
-            # Test dataset should NEVER be augmented - just batch and prefetch
-            test_ds = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
-        else:
-            print("🎨 Using Standard Augmentation")
-            train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
-            train_ds = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
-            test_ds = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
+        # Apply standard augmentation
+        print("🎨 Using Standard Augmentation")
+        train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
+        train_ds = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
+        test_ds = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
     model = model_class(num_classes=num_classes, input_channels=input_channels, rngs=nnx.Rngs(rng_seed))
     if pretrained_encoder_path:
         print(f"💾 Loading pretrained encoder weights from {pretrained_encoder_path}...")
@@ -1145,27 +1103,14 @@ def _train_model_loop(
     print(f"Starting training for {total_steps} steps...")
     global_step_counter = 0
     for epoch in range(current_num_epochs):
-        # Prepare training iterator based on augmentation type
-        if use_keras_cv_augmentation:
-            # Datasets are already batched and processed
-            epoch_train_iter = train_ds.as_numpy_iterator()
-        else:
-            # Standard augmentation - datasets need to be batched
-            epoch_train_iter = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
+        # Prepare training iterator - datasets are already batched and processed
+        epoch_train_iter = train_ds.as_numpy_iterator()
         
         pbar = tqdm(epoch_train_iter, total=steps_per_epoch, desc=f"Epoch {epoch + 1}/{current_num_epochs} ({stage})")
         
         for batch_data in pbar:
             # Both augmentation types now return dict format
             batch_dict = batch_data
-            
-            # Debug: Print first few batches to see what's happening
-            if global_step_counter < 3:
-                print(f"DEBUG: Batch {global_step_counter}")
-                print(f"  Images shape: {batch_dict['image'].shape}")
-                print(f"  Labels shape: {batch_dict['label'].shape}")
-                print(f"  Labels range: {batch_dict['label'].min()} to {batch_dict['label'].max()}")
-                print(f"  Images range: {batch_dict['image'].min():.3f} to {batch_dict['image'].max():.3f}")
             
             train_step(model, optimizer, metrics_computer, batch_dict, num_classes=num_classes, label_smoothing=label_smooth, orthogonality_weight=orthogonality_weight)
             global_step_counter += 1
