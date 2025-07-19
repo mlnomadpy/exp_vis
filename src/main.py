@@ -54,7 +54,6 @@ def main():
     parser.add_argument('--orthogonality_weight', type=float, default=0.0, help='Weight for orthogonality regularization of output layer')
     
     # Augmentation arguments
-    parser.add_argument('--use_keras_cv_augmentation', action='store_true', default=False, help='Use KerasCV augmentation (includes CutMix and MixUp)')
     parser.add_argument('--augmentation_type', type=str, default='comprehensive', 
                        choices=['comprehensive', 'aggressive', 'light'],
                        help='Type of random choice augmentation')
@@ -78,7 +77,6 @@ def main():
             'scheduler_type': 'cosine', 'optimizer_type': 'novograd',
             'scheduler_params': {'alpha': 0.0},
             # Augmentation config
-            'use_keras_cv_augmentation': True,
             'augmentation_type': 'comprehensive',
             'pretrain_augmentation_type': 'comprehensive',
         },
@@ -95,7 +93,6 @@ def main():
             'scheduler_type': 'cosine', 'optimizer_type': 'novograd',
             'scheduler_params': {'alpha': 0.0},
             # Augmentation config
-            'use_keras_cv_augmentation': True,
             'augmentation_type': 'comprehensive',
             'pretrain_augmentation_type': 'comprehensive',
         },
@@ -112,7 +109,6 @@ def main():
             'scheduler_type': 'cosine', 'optimizer_type': 'novograd',
             'scheduler_params': {'alpha': 0.0},
             # Augmentation config
-            'use_keras_cv_augmentation': True,
             'augmentation_type': 'light',
             'pretrain_augmentation_type': 'light',
         },
@@ -126,7 +122,6 @@ def main():
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 10, 'dataset': 'fashion_mnist', 'apply_normalization': True,
             # Augmentation config
-            'use_keras_cv_augmentation': True,
             'augmentation_type': 'light',
             'pretrain_augmentation_type': 'light',
         },
@@ -140,7 +135,6 @@ def main():
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 1000, 'dataset': 'imagenet2012', 'apply_normalization': True,
             # Augmentation config
-            'use_keras_cv_augmentation': True,
             'augmentation_type': 'aggressive',
             'pretrain_augmentation_type': 'aggressive',
         },
@@ -154,7 +148,6 @@ def main():
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 101, 'dataset': 'caltech101', 'apply_normalization': True,
             # Augmentation config
-            'use_keras_cv_augmentation': True,
             'augmentation_type': 'comprehensive',
             'pretrain_augmentation_type': 'comprehensive',
         },
@@ -168,7 +161,6 @@ def main():
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 102, 'dataset': 'oxford_flowers102', 'apply_normalization': True,
             # Augmentation config
-            'use_keras_cv_augmentation': True,
             'augmentation_type': 'comprehensive',
             'pretrain_augmentation_type': 'comprehensive',
         },
@@ -182,7 +174,6 @@ def main():
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 120, 'dataset': 'stanford_dogs', 'apply_normalization': True,
             # Augmentation config
-            'use_keras_cv_augmentation': True,
             'augmentation_type': 'comprehensive',
             'pretrain_augmentation_type': 'comprehensive',
         },
@@ -196,7 +187,6 @@ def main():
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 2, 'dataset': 'cats_vs_dogs', 'apply_normalization': True,
             # Augmentation config
-            'use_keras_cv_augmentation': True,
             'augmentation_type': 'comprehensive',
             'pretrain_augmentation_type': 'comprehensive',
         },
@@ -210,7 +200,6 @@ def main():
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'num_classes': 10, 'dataset': 'stl10', 'apply_normalization': True,
             # Augmentation config
-            'use_keras_cv_augmentation': True,
             'augmentation_type': 'comprehensive',
             'pretrain_augmentation_type': 'comprehensive',
         },
@@ -223,7 +212,6 @@ def main():
             'embedding_size': 16, 'samples_per_class': 32, 'orth_lean': 1/137, 'log_rate': 10000,
             'apply_normalization': True,
             # Augmentation config
-            'use_keras_cv_augmentation': True,
             'augmentation_type': 'comprehensive',
             'pretrain_augmentation_type': 'comprehensive',
         }
@@ -305,8 +293,6 @@ def main():
         config['scheduler_params'] = scheduler_params
     
     # Augmentation argument updates
-    if args.use_keras_cv_augmentation is not None:
-        config['use_keras_cv_augmentation'] = args.use_keras_cv_augmentation
     if args.augmentation_type is not None:
         config['augmentation_type'] = args.augmentation_type
     if args.pretrain_augmentation_type is not None:

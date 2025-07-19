@@ -89,6 +89,5 @@ python src/main.py \
   --scheduler_end_value $SCHEDULER_END_VALUE \
   --scheduler_power $SCHEDULER_POWER \
   --orthogonality_weight $ORTHOGONALITY_WEIGHT \
-  --use_keras_cv_augmentation \
   --augmentation_type $AUGMENTATION_TYPE \
   --pretrain_augmentation_type $PRETRAIN_AUGMENTATION_TYPE 
