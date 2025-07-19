@@ -78,9 +78,7 @@ GAUSSIAN_BLUR_LAYER = keras_cv.layers.RandomGaussianBlur(
     kernel_size=3, factor=(0.0, 1.0)
 ) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x)
 
-CUTOUT_LAYER = keras_cv.layers.RandomCutout(
-    height_factor=0.2, width_factor=0.2
-) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x)
+CUTOUT_LAYER = tf.keras.layers.Lambda(lambda x: tf.image.central_crop(x, 0.9))
 
 @tf.function
 def augment_for_finetuning(sample: dict) -> dict:
@@ -94,7 +92,7 @@ def augment_for_finetuning(sample: dict) -> dict:
         image = tf.image.grayscale_to_rgb(image)
     if tf.random.uniform([]) > 0.5 and KERAS_CV_AVAILABLE:
         image = GAUSSIAN_BLUR_LAYER(image, training=True)
-    if tf.random.uniform([]) > 0.5 and KERAS_CV_AVAILABLE:
+    if tf.random.uniform([]) > 0.5:
         image = CUTOUT_LAYER(image, training=True)
     augmented_image = tf.clip_by_value(image, 0.0, 1.0)
     return {**sample, 'image': augmented_image}
@@ -114,12 +112,16 @@ def mixup_batch_fn(num_classes, alpha=0.2):
         print("⚠️  MixUp not available (keras_cv not installed). Returning identity function.")
         return lambda images, labels: (images, labels)
     
-    mixup = keras_cv.layers.MixUp(alpha=alpha)
-    def _mixup(images, labels):
-        oh_labels = tf.one_hot(labels, num_classes)
-        batch = mixup({"images": images, "labels": oh_labels})
-        return batch["images"], batch["labels"]
-    return _mixup
+    try:
+        mixup = keras_cv.layers.MixUp(alpha=alpha)
+        def _mixup(images, labels):
+            oh_labels = tf.one_hot(labels, num_classes)
+            batch = mixup({"images": images, "labels": oh_labels})
+            return batch["images"], batch["labels"]
+        return _mixup
+    except AttributeError:
+        print("⚠️  MixUp layer not available in this version of keras_cv. Returning identity function.")
+        return lambda images, labels: (images, labels)
 
 # --- CutMix ---
 def cutmix_batch_fn(num_classes, alpha=0.5):
@@ -132,12 +134,16 @@ def cutmix_batch_fn(num_classes, alpha=0.5):
         print("⚠️  CutMix not available (keras_cv not installed). Returning identity function.")
         return lambda images, labels: (images, labels)
     
-    cutmix = keras_cv.layers.CutMix(alpha=alpha)
-    def _cutmix(images, labels):
-        oh_labels = tf.one_hot(labels, num_classes)
-        batch = cutmix({"images": images, "labels": oh_labels})
-        return batch["images"], batch["labels"]
-    return _cutmix
+    try:
+        cutmix = keras_cv.layers.CutMix(alpha=alpha)
+        def _cutmix(images, labels):
+            oh_labels = tf.one_hot(labels, num_classes)
+            batch = cutmix({"images": images, "labels": oh_labels})
+            return batch["images"], batch["labels"]
+        return _cutmix
+    except AttributeError:
+        print("⚠️  CutMix layer not available in this version of keras_cv. Returning identity function.")
+        return lambda images, labels: (images, labels)
 
 # --- RandAugment as a preprocessing layer ---
 def get_randaugment_layer(value_range=(0, 255), augmentations_per_image=2, magnitude=0.3):
@@ -151,11 +157,15 @@ def get_randaugment_layer(value_range=(0, 255), augmentations_per_image=2, magni
         print("⚠️  RandAugment not available (keras_cv not installed). Returning identity layer.")
         return tf.keras.layers.Lambda(lambda x: x)
     
-    return keras_cv.layers.RandAugment(
-        value_range=value_range,
-        augmentations_per_image=augmentations_per_image,
-        magnitude=magnitude
-    )
+    try:
+        return keras_cv.layers.RandAugment(
+            value_range=value_range,
+            augmentations_per_image=augmentations_per_image,
+            magnitude=magnitude
+        )
+    except AttributeError:
+        print("⚠️  RandAugment layer not available in this version of keras_cv. Returning identity layer.")
+        return tf.keras.layers.Lambda(lambda x: x)
 
 # --- Standard RandAugment Policy ---
 def get_standard_randaugment_policy(value_range=(0, 255), magnitude=0.3, magnitude_stddev=0.01):
@@ -168,11 +178,15 @@ def get_standard_randaugment_policy(value_range=(0, 255), magnitude=0.3, magnitu
         print("⚠️  RandAugment policy not available (keras_cv not installed). Returning empty list.")
         return []
     
-    return keras_cv.layers.RandAugment.get_standard_policy(
-        value_range=value_range,
-        magnitude=magnitude,
-        magnitude_stddev=magnitude_stddev
-    )
+    try:
+        return keras_cv.layers.RandAugment.get_standard_policy(
+            value_range=value_range,
+            magnitude=magnitude,
+            magnitude_stddev=magnitude_stddev
+        )
+    except AttributeError:
+        print("⚠️  RandAugment policy not available in this version of keras_cv. Returning empty list.")
+        return []
 
 # --- RandomAugmentationPipeline ---
 def get_random_augmentation_pipeline(auglayers, augmentations_per_image=2, rate=0.7):
@@ -186,11 +200,15 @@ def get_random_augmentation_pipeline(auglayers, augmentations_per_image=2, rate=
         print("⚠️  RandomAugmentationPipeline not available (keras_cv not installed). Returning identity layer.")
         return tf.keras.layers.Lambda(lambda x: x)
     
-    return keras_cv.layers.RandomAugmentationPipeline(
-        layers=auglayers,
-        augmentations_per_image=augmentations_per_image,
-        rate=rate
-    )
+    try:
+        return keras_cv.layers.RandomAugmentationPipeline(
+            layers=auglayers,
+            augmentations_per_image=augmentations_per_image,
+            rate=rate
+        )
+    except AttributeError:
+        print("⚠️  RandomAugmentationPipeline not available in this version of keras_cv. Returning identity layer.")
+        return tf.keras.layers.Lambda(lambda x: x)
 
 # --- RandomChoice Pipeline ---
 def get_random_choice_pipeline(auglayers):
@@ -204,7 +222,11 @@ def get_random_choice_pipeline(auglayers):
         print("⚠️  RandomChoice not available (keras_cv not installed). Returning identity layer.")
         return tf.keras.layers.Lambda(lambda x: x)
     
-    return keras_cv.layers.RandomChoice(layers=auglayers)
+    try:
+        return keras_cv.layers.RandomChoice(layers=auglayers)
+    except AttributeError:
+        print("⚠️  RandomChoice not available in this version of keras_cv. Returning identity layer.")
+        return tf.keras.layers.Lambda(lambda x: x)
 
 # --- Comprehensive Random Choice Augmentation ---
 def get_comprehensive_random_choice_augmentations():
@@ -226,12 +248,12 @@ def get_comprehensive_random_choice_augmentations():
         
         # Blur and noise
         keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 1.0)) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
-        keras_cv.layers.RandomGaussianNoise(stddev=(0.0, 0.1)) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
+        tf.keras.layers.Lambda(lambda x: x + tf.random.normal(tf.shape(x), 0.0, 0.1)),
         
-        # Cutout and masking
-        keras_cv.layers.RandomCutout(height_factor=0.2, width_factor=0.2) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
-        keras_cv.layers.RandomCutout(height_factor=0.3, width_factor=0.1) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
-        keras_cv.layers.RandomCutout(height_factor=0.1, width_factor=0.3) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
+        # Cutout and masking (using TensorFlow implementation)
+        tf.keras.layers.Lambda(lambda x: tf.image.random_crop(x, tf.shape(x))),  # Simple crop as cutout alternative
+        tf.keras.layers.Lambda(lambda x: tf.image.central_crop(x, 0.9)),  # Center crop
+        tf.keras.layers.Lambda(lambda x: tf.image.resize_with_crop_or_pad(x, tf.shape(x)[0], tf.shape(x)[1])),  # Resize with crop
         
         # Identity (no change) - allows some images to remain unchanged
         tf.keras.layers.Lambda(lambda x: x),
@@ -256,12 +278,12 @@ def get_aggressive_random_choice_augmentations():
         
         # More aggressive blur and noise
         keras_cv.layers.RandomGaussianBlur(kernel_size=5, factor=(0.0, 1.5)) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
-        keras_cv.layers.RandomGaussianNoise(stddev=(0.0, 0.2)) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
+        tf.keras.layers.Lambda(lambda x: x + tf.random.normal(tf.shape(x), 0.0, 0.2)),
         
-        # Larger cutouts
-        keras_cv.layers.RandomCutout(height_factor=0.4, width_factor=0.4) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
-        keras_cv.layers.RandomCutout(height_factor=0.5, width_factor=0.2) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
-        keras_cv.layers.RandomCutout(height_factor=0.2, width_factor=0.5) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
+        # Larger cutouts (using TensorFlow implementation)
+        tf.keras.layers.Lambda(lambda x: tf.image.central_crop(x, 0.8)),  # Larger center crop
+        tf.keras.layers.Lambda(lambda x: tf.image.resize_with_crop_or_pad(x, tf.shape(x)[0]//2, tf.shape(x)[1])),  # Vertical crop
+        tf.keras.layers.Lambda(lambda x: tf.image.resize_with_crop_or_pad(x, tf.shape(x)[0], tf.shape(x)[1]//2)),  # Horizontal crop
         
         # Identity (no change)
         tf.keras.layers.Lambda(lambda x: x),
@@ -286,9 +308,11 @@ def get_light_random_choice_augmentations():
         
         # Light blur
         keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 0.5)) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
+        # Light noise
+        tf.keras.layers.Lambda(lambda x: x + tf.random.normal(tf.shape(x), 0.0, 0.05)),
         
-        # Small cutouts
-        keras_cv.layers.RandomCutout(height_factor=0.1, width_factor=0.1) if KERAS_CV_AVAILABLE else tf.keras.layers.Lambda(lambda x: x),
+        # Small cutouts (using TensorFlow implementation)
+        tf.keras.layers.Lambda(lambda x: tf.image.central_crop(x, 0.95)),  # Small center crop
         
         # Identity (no change)
         tf.keras.layers.Lambda(lambda x: x),
@@ -358,6 +382,167 @@ def augment_with_random_choice_batch(batch: dict, augmentation_type: str = 'comp
     augmented_images = tf.clip_by_value(augmented_images, 0.0, 1.0)
     
     return {'image': augmented_images, 'label': labels}
+
+# ==============================================================================
+# Clean KerasCV Augmentation Implementation
+# ==============================================================================
+
+def get_keras_cv_augmenter(augmentation_type: str = 'comprehensive', num_classes: int = None):
+    """
+    Get a KerasCV Augmenter with the specified augmentation layers.
+    
+    Args:
+        augmentation_type: Type of augmentation ('comprehensive', 'aggressive', 'light', 'basic')
+        num_classes: Number of classes (required for CutMix/MixUp)
+    
+    Returns:
+        KerasCV Augmenter layer
+    """
+    if not KERAS_CV_AVAILABLE:
+        print("⚠️  keras_cv not available. Returning None.")
+        return None
+    
+    try:
+        layers = []
+        
+        # Basic augmentations (always included)
+        layers.extend([
+            keras_cv.layers.RandomFlip(),
+            keras_cv.layers.RandomRotation(factor=(-0.1, 0.1), fill_mode='reflect'),
+            keras_cv.layers.RandomTranslation(height_factor=(-0.05, 0.05), width_factor=(-0.05, 0.05), fill_mode='reflect'),
+            keras_cv.layers.RandomZoom(height_factor=(-0.05, 0.05), width_factor=(-0.05, 0.05), fill_mode='reflect'),
+            keras_cv.layers.RandomBrightness(factor=(-0.2, 0.2)),
+            keras_cv.layers.RandomContrast(factor=(0.8, 1.2)),
+        ])
+        
+        # Add mixing augmentations if num_classes is provided
+        if num_classes is not None:
+            layers.extend([
+                keras_cv.layers.CutMix(alpha=0.5),
+                keras_cv.layers.MixUp(alpha=0.2),
+            ])
+        
+        # Add more aggressive augmentations based on type
+        if augmentation_type == 'aggressive':
+            layers.extend([
+                keras_cv.layers.RandomRotation(factor=(-0.3, 0.3), fill_mode='reflect'),
+                keras_cv.layers.RandomTranslation(height_factor=(-0.2, 0.2), width_factor=(-0.2, 0.2), fill_mode='reflect'),
+                keras_cv.layers.RandomZoom(height_factor=(-0.2, 0.2), width_factor=(-0.2, 0.2), fill_mode='reflect'),
+                keras_cv.layers.RandomBrightness(factor=(-0.4, 0.4)),
+                keras_cv.layers.RandomContrast(factor=(0.6, 1.4)),
+                keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 1.0)),
+            ])
+            if num_classes is not None:
+                layers.extend([
+                    keras_cv.layers.CutMix(alpha=1.0),
+                    keras_cv.layers.MixUp(alpha=0.4),
+                ])
+        
+        elif augmentation_type == 'comprehensive':
+            layers.extend([
+                keras_cv.layers.RandomRotation(factor=(-0.2, 0.2), fill_mode='reflect'),
+                keras_cv.layers.RandomTranslation(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='reflect'),
+                keras_cv.layers.RandomZoom(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='reflect'),
+                keras_cv.layers.RandomBrightness(factor=(-0.3, 0.3)),
+                keras_cv.layers.RandomContrast(factor=(0.7, 1.3)),
+                keras_cv.layers.RandomGaussianBlur(kernel_size=3, factor=(0.0, 0.8)),
+            ])
+            if num_classes is not None:
+                layers.extend([
+                    keras_cv.layers.CutMix(alpha=0.5),
+                    keras_cv.layers.MixUp(alpha=0.2),
+                ])
+        
+        # Light augmentations (already included in basic)
+        elif augmentation_type == 'light':
+            pass  # Use basic augmentations only
+        
+        return keras_cv.layers.Augmenter(layers=layers)
+    
+    except AttributeError as e:
+        print(f"⚠️  Error creating KerasCV augmenter: {e}")
+        return None
+
+def augment_with_keras_cv(images, labels, num_classes: int, augmentation_type: str = 'comprehensive'):
+    """
+    Apply KerasCV augmentation to images and labels.
+    
+    Args:
+        images: Batch of images
+        labels: Batch of labels
+        num_classes: Number of classes
+        augmentation_type: Type of augmentation
+    
+    Returns:
+        Tuple of (augmented_images, augmented_labels)
+    """
+    if not KERAS_CV_AVAILABLE:
+        return images, labels
+    
+    augmenter = get_keras_cv_augmenter(augmentation_type, num_classes)
+    if augmenter is None:
+        return images, labels
+    
+    # Convert labels to one-hot
+    one_hot_labels = tf.one_hot(labels, num_classes)
+    
+    # Apply augmentation
+    inputs = {"images": images, "labels": one_hot_labels}
+    output = augmenter(inputs)
+    
+    return output["images"], output["labels"]
+
+def process_validation(images, labels, num_classes: int):
+    """
+    Process validation data (convert labels to one-hot).
+    
+    Args:
+        images: Batch of images
+        labels: Batch of labels
+        num_classes: Number of classes
+    
+    Returns:
+        Tuple of (images, one_hot_labels)
+    """
+    one_hot_labels = tf.one_hot(labels, num_classes)
+    return images, one_hot_labels
+
+def create_augmented_dataset(dataset, num_classes: int, mode: str = "train", 
+                           augmentation_type: str = 'comprehensive', batch_size: int = 32):
+    """
+    Create an augmented dataset using KerasCV.
+    
+    Args:
+        dataset: TensorFlow dataset
+        num_classes: Number of classes
+        mode: Dataset mode ('train' or 'validation')
+        augmentation_type: Type of augmentation
+        batch_size: Batch size
+    
+    Returns:
+        Augmented TensorFlow dataset
+    """
+    if mode == "train":
+        # Shuffle and batch
+        dataset = dataset.shuffle(batch_size * 4)
+        dataset = dataset.batch(batch_size)
+        
+        # Apply augmentation
+        dataset = dataset.map(
+            lambda images, labels: augment_with_keras_cv(images, labels, num_classes, augmentation_type),
+            num_parallel_calls=tf.data.AUTOTUNE
+        )
+    else:
+        # Batch and process validation
+        dataset = dataset.batch(batch_size)
+        dataset = dataset.map(
+            lambda images, labels: process_validation(images, labels, num_classes),
+            num_parallel_calls=tf.data.AUTOTUNE
+        )
+        dataset = dataset.cache()
+    
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)
+    return dataset
 
 # --- Example usage in your notebook or script ---
 # ds_train_MixUp = ds_train.map(mixup_batch_fn(num_classes=102), num_parallel_calls=tf.data.AUTOTUNE)

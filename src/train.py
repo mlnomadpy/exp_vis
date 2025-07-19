@@ -13,7 +13,8 @@ from models import YatCNN, ConvAutoencoder
 from data import (
     create_image_folder_dataset, get_image_processor, get_tfds_processor, 
     augment_for_pretraining, augment_for_finetuning,
-    augment_with_random_choice, augment_with_random_choice_batch
+    augment_with_random_choice, augment_with_random_choice_batch,
+    create_augmented_dataset, augment_with_keras_cv, process_validation
 )
 import tensorflow_datasets as tfds
 import tensorflow as tf
@@ -970,7 +971,7 @@ def _train_model_loop(
     
     # Get augmentation configuration
     augmentation_type = dataset_config.get('augmentation_type', 'comprehensive')
-    use_random_choice_augmentation = dataset_config.get('use_random_choice_augmentation', True)
+    use_keras_cv_augmentation = dataset_config.get('use_keras_cv_augmentation', True)
     
     # Debug: Print what config values are being used
     print(f"🔧 Training config values:")
@@ -982,9 +983,11 @@ def _train_model_loop(
     print(f"   label_smooth: {label_smooth}")
     print(f"   orthogonality_weight: {orthogonality_weight}")
     print(f"   augmentation_type: {augmentation_type}")
-    print(f"   use_random_choice_augmentation: {use_random_choice_augmentation}")
+    print(f"   use_keras_cv_augmentation: {use_keras_cv_augmentation}")
     if orthogonality_weight > 0:
         print(f"   ✅ Orthogonality regularization enabled with weight: {orthogonality_weight}")
+    if use_keras_cv_augmentation:
+        print(f"   🎨 KerasCV augmentation enabled: {augmentation_type}")
     print(f"   Full dataset_config: {dataset_config}")
     if is_path:
         split_percentage = dataset_config.get('test_split_percentage', 0.2)
@@ -995,15 +998,20 @@ def _train_model_loop(
         test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         
         # Apply augmentation based on configuration
-        if use_random_choice_augmentation:
-            print(f"🎨 Using Random Choice Augmentation (type: {augmentation_type})")
-            train_ds = train_ds.map(
-                lambda x: augment_with_random_choice(x, augmentation_type), 
-                num_parallel_calls=tf.data.AUTOTUNE
+        if use_keras_cv_augmentation:
+            print(f"🎨 Using KerasCV Augmentation (type: {augmentation_type})")
+            # Create augmented training dataset using the clean KerasCV approach
+            train_ds = create_augmented_dataset(
+                train_ds, num_classes, mode="train", 
+                augmentation_type=augmentation_type, batch_size=current_batch_size
             )
+            # Test dataset should NEVER be augmented - just batch and prefetch
+            test_ds = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
         else:
             print("🎨 Using Standard Augmentation")
             train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
+            train_ds = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
+            test_ds = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
     else: # TFDS logic
         (train_ds, test_ds), ds_info = tfds.load(
             dataset_name,
@@ -1020,15 +1028,20 @@ def _train_model_loop(
         test_ds = test_ds.map(processor, num_parallel_calls=tf.data.AUTOTUNE)
         
         # Apply augmentation based on configuration
-        if use_random_choice_augmentation:
-            print(f"🎨 Using Random Choice Augmentation (type: {augmentation_type})")
-            train_ds = train_ds.map(
-                lambda x: augment_with_random_choice(x, augmentation_type), 
-                num_parallel_calls=tf.data.AUTOTUNE
+        if use_keras_cv_augmentation:
+            print(f"🎨 Using KerasCV Augmentation (type: {augmentation_type})")
+            # Create augmented training dataset using the clean KerasCV approach
+            train_ds = create_augmented_dataset(
+                train_ds, num_classes, mode="train", 
+                augmentation_type=augmentation_type, batch_size=current_batch_size
             )
+            # Test dataset should NEVER be augmented - just batch and prefetch
+            test_ds = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
         else:
             print("🎨 Using Standard Augmentation")
             train_ds = train_ds.map(augment_for_finetuning, num_parallel_calls=tf.data.AUTOTUNE)
+            train_ds = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
+            test_ds = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
     model = model_class(num_classes=num_classes, input_channels=input_channels, rngs=nnx.Rngs(rng_seed))
     if pretrained_encoder_path:
         print(f"💾 Loading pretrained encoder weights from {pretrained_encoder_path}...")
@@ -1107,23 +1120,46 @@ def _train_model_loop(
     print(f"Starting training for {total_steps} steps...")
     global_step_counter = 0
     for epoch in range(current_num_epochs):
-        epoch_train_iter = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
+        # Prepare training iterator based on augmentation type
+        if use_keras_cv_augmentation:
+            # Datasets are already batched and processed
+            epoch_train_iter = train_ds.as_numpy_iterator()
+        else:
+            # Standard augmentation - datasets need to be batched
+            epoch_train_iter = train_ds.shuffle(1024).batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
+        
         pbar = tqdm(epoch_train_iter, total=steps_per_epoch, desc=f"Epoch {epoch + 1}/{current_num_epochs} ({stage})")
+        
         for batch_data in pbar:
-            train_step(model, optimizer, metrics_computer, batch_data, num_classes=num_classes, label_smoothing=label_smooth, orthogonality_weight=orthogonality_weight)
+            # Convert batch data to dict format if needed
+            if use_keras_cv_augmentation:
+                # Convert from (images, labels) tuple to dict format
+                batch_dict = {'image': batch_data[0], 'label': batch_data[1]}
+            else:
+                # Already in dict format from processor
+                batch_dict = batch_data
+            
+            train_step(model, optimizer, metrics_computer, batch_dict, num_classes=num_classes, label_smoothing=label_smooth, orthogonality_weight=orthogonality_weight)
+            global_step_counter += 1
+            
+            # Always evaluate at specified intervals
             if global_step_counter > 0 and (global_step_counter % current_eval_every == 0 or global_step_counter >= total_steps -1):
                 train_metrics = metrics_computer.compute()
                 metrics_history['train_loss'].append(train_metrics['loss'])
                 metrics_history['train_accuracy'].append(train_metrics['accuracy'])
                 metrics_computer.reset()
-                current_test_iter = test_ds.batch(current_batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE).as_numpy_iterator()
+                
+                # Evaluate on test dataset (never augmented)
+                current_test_iter = test_ds.as_numpy_iterator()
                 for test_batch in current_test_iter:
                     eval_step(model, metrics_computer, test_batch, num_classes)
+                
                 test_metrics = metrics_computer.compute()
                 metrics_history['test_loss'].append(test_metrics['loss'])
                 metrics_history['test_accuracy'].append(test_metrics['accuracy'])
                 metrics_computer.reset()
                 pbar.set_postfix({'Train Acc': f"{train_metrics['accuracy']:.4f}", 'Test Acc': f"{test_metrics['accuracy']:.4f}"})
+                
                 # Log progress to wandb
                 current_lr = get_current_learning_rate(
                     optimizer, global_step_counter, scheduler_type,
@@ -1140,8 +1176,9 @@ def _train_model_loop(
                     'learning_rate': current_lr,
                     'orthogonality_loss': float(train_metrics.get('orthogonality_loss', 0.0)),
                 }, step=global_step_counter)
-            global_step_counter += 1
-        if global_step_counter >= total_steps: break
+            
+            if global_step_counter >= total_steps: 
+                break
     print(f"✅ {stage} complete on {dataset_name} after {global_step_counter} steps!")
     if metrics_history['test_accuracy']:
         print(f"    Final Test Accuracy: {metrics_history['test_accuracy'][-1]:.4f}")
