@@ -40,6 +40,7 @@ class YatResBlock(nnx.Module):
     def __init__(self, in_channels: int, out_channels: int, *, stride: int = 1, dropout_rate: float = 0.2, rngs: nnx.Rngs):
         self.yat_conv = YatConv(in_channels, out_channels, kernel_size=(3, 3), strides=(stride, stride), use_bias=False, padding='SAME', rngs=rngs)
         self.lin_conv = nnx.Conv(out_channels, out_channels, kernel_size=(3, 3), use_bias=False, padding='SAME', rngs=rngs)
+        self.dropout_yat = nnx.Dropout(rate=dropout_rate, rngs=rngs)
         self.dropout = nnx.Dropout(rate=dropout_rate, rngs=rngs)
         self.needs_projection = in_channels != out_channels or stride != 1
         if self.needs_projection:
@@ -48,12 +49,14 @@ class YatResBlock(nnx.Module):
     def __call__(self, x, training: bool):
         residual = x
         y = self.yat_conv(x)
+        y = self.dropout_yat(y, deterministic=not training)
         y = self.lin_conv(y)
-        y = self.dropout(y, deterministic=not training)
 
         if self.needs_projection:
             residual = self.residual_proj(residual)
         y = y + residual
+        y = self.dropout(y, deterministic=not training)
+
         return y
 # Resnet-18/2
 class YatCNN(nnx.Module): 
