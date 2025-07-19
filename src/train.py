@@ -591,8 +591,13 @@ def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0, orthog
     
     # Handle both regular integer labels and one-hot labels from KerasCV augmentation
     labels = batch['label']
-    # Regular integer labels - convert to one-hot
-    one_hot_labels = jax.nn.one_hot(labels, num_classes=num_classes)
+    # Check if labels are already one-hot encoded (from KerasCV CutMix/MixUp)
+    if labels.ndim == 2:
+        # Labels are already one-hot encoded
+        one_hot_labels = labels
+    else:
+        # Regular integer labels - convert to one-hot
+        one_hot_labels = jax.nn.one_hot(labels, num_classes=num_classes)
     
     if label_smoothing > 0:
         smoothed_labels = optax.smooth_labels(one_hot_labels, alpha=label_smoothing)
@@ -632,6 +637,9 @@ def train_step(model, optimizer: nnx.Optimizer, metrics: nnx.MultiMetric, batch,
     
     # Convert labels to integer format for metrics if they're one-hot
     labels = batch['label']
+    # If labels are one-hot encoded (from KerasCV CutMix/MixUp), convert to integers
+    if labels.ndim == 2:
+        labels = jnp.argmax(labels, axis=-1)
     
     metrics.update(loss=loss, logits=logits, labels=labels, orthogonality_loss=orthogonality_loss)
     optimizer.update(grads)
@@ -642,6 +650,9 @@ def eval_step(model, metrics: nnx.MultiMetric, batch, num_classes: int):
     
     # Convert labels to integer format for metrics if they're one-hot
     labels = batch['label']
+    # If labels are one-hot encoded (from KerasCV CutMix/MixUp), convert to integers
+    if labels.ndim == 2:
+        labels = jnp.argmax(labels, axis=-1)
     
     metrics.update(loss=loss, logits=logits, labels=labels, orthogonality_loss=orthogonality_loss)
 
