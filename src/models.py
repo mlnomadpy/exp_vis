@@ -40,7 +40,6 @@ class YatResBlock(nnx.Module):
     def __init__(self, in_channels: int, out_channels: int, *, stride: int = 1, dropout_rate: float = 0.2, rngs: nnx.Rngs):
         self.yat_conv = YatConv(in_channels, out_channels, kernel_size=(3, 3), strides=(stride, stride), use_bias=False, padding='SAME', rngs=rngs)
         self.lin_conv = nnx.Conv(out_channels, out_channels, kernel_size=(3, 3), use_bias=False, padding='SAME', rngs=rngs)
-        self.dropout_yat = nnx.Dropout(rate=dropout_rate, rngs=rngs)
         self.dropout = nnx.Dropout(rate=dropout_rate, rngs=rngs)
         self.needs_projection = in_channels != out_channels or stride != 1
         if self.needs_projection:
@@ -58,7 +57,7 @@ class YatResBlock(nnx.Module):
 
         return y
 # Resnet-18/2
-class YatCNN(nnx.Module): 
+class YatCNN_res(nnx.Module): 
     def __init__(self, *, num_classes: int, input_channels: int, rngs: nnx.Rngs):
         # Initial convolution
         self.conv1 = nnx.Conv(input_channels, 32, kernel_size=(3, 3), strides=(2, 2), use_bias=False, padding='SAME', rngs=rngs)
@@ -118,16 +117,16 @@ class YatCNN(nnx.Module):
         return x
 
 # Keep the old YatCNN for backward compatibility
-class YatCNN_old(nnx.Module):
+class YatCNN(nnx.Module):
     def __init__(self, *, num_classes: int, input_channels: int, rngs: nnx.Rngs):
-        self.stem = YatConv(input_channels, 64, kernel_size=(3, 3), strides=(1, 1), use_bias=False, padding='SAME', rngs=rngs)
+        self.stem = nnx.Conv(input_channels, 32, kernel_size=(3, 3), strides=(1, 1), use_bias=False, padding='SAME', rngs=rngs)
 
-        self.block1 = YatConvBlock(64, 64, dropout_rate=0.2, pool=False, rngs=rngs)
+        self.block1 = YatConvBlock(32, 64, dropout_rate=0.2, pool=True, rngs=rngs)
         self.block2 = YatConvBlock(64, 128, dropout_rate=0.2, pool=True, rngs=rngs)
         self.block3 = YatConvBlock(128, 256, dropout_rate=0.2, pool=True, rngs=rngs)
         self.block4 = YatConvBlock(256, 512, dropout_rate=0.2, pool=True, rngs=rngs)
-        self.block5 = YatConvBlock(512, 512, dropout_rate=0.2, pool=False, rngs=rngs)
-        self.out_linear = YatNMN(512, num_classes, use_bias=False, rngs=rngs)
+        self.block5 = YatConvBlock(512, 1024, dropout_rate=0.2, pool=False, rngs=rngs)
+        self.out_linear = YatNMN(1024, num_classes, use_bias=False, rngs=rngs)
         self.rngs = rngs
     def __call__(self, x, training: bool = False, return_activations_for_layer: tp.Optional[str] = None, apply_masking: bool = False, mask_ratio: float = 0.75):
         x = self.stem(x)
