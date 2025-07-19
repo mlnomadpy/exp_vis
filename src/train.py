@@ -592,7 +592,13 @@ def loss_fn(model, batch, num_classes: int, label_smoothing: float = 0.0, orthog
     # Handle both regular integer labels and one-hot labels from KerasCV augmentation
     labels = batch['label']
     
-    one_hot_labels = jax.nn.one_hot(labels, num_classes=num_classes)
+    # Check if labels are already one-hot encoded (from KerasCV CutMix/MixUp)
+    if labels.ndim == 2:
+        # Labels are already one-hot encoded
+        one_hot_labels = labels
+    else:
+        # Regular integer labels - convert to one-hot
+        one_hot_labels = jax.nn.one_hot(labels, num_classes=num_classes)
     
     if label_smoothing > 0:
         smoothed_labels = optax.smooth_labels(one_hot_labels, alpha=label_smoothing)
@@ -1152,6 +1158,14 @@ def _train_model_loop(
         for batch_data in pbar:
             # Both augmentation types now return dict format
             batch_dict = batch_data
+            
+            # Debug: Print first few batches to see what's happening
+            if global_step_counter < 3:
+                print(f"DEBUG: Batch {global_step_counter}")
+                print(f"  Images shape: {batch_dict['image'].shape}")
+                print(f"  Labels shape: {batch_dict['label'].shape}")
+                print(f"  Labels range: {batch_dict['label'].min()} to {batch_dict['label'].max()}")
+                print(f"  Images range: {batch_dict['image'].min():.3f} to {batch_dict['image'].max():.3f}")
             
             train_step(model, optimizer, metrics_computer, batch_dict, num_classes=num_classes, label_smoothing=label_smooth, orthogonality_weight=orthogonality_weight)
             global_step_counter += 1
