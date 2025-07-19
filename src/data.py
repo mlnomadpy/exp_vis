@@ -557,11 +557,8 @@ def create_augmented_dataset(dataset, num_classes: int, mode: str = "train",
                 # Tuple format: (images, labels)
                 images, labels = batch_data
             
-            # Convert labels to one-hot for validation
-            one_hot_labels = tf.one_hot(labels, num_classes)
-            
             # Return in dict format for consistency
-            return {'image': images, 'label': one_hot_labels}
+            return {'image': images, 'label': labels}
         
         dataset = dataset.map(process_batch, num_parallel_calls=tf.data.AUTOTUNE)
         dataset = dataset.cache()
